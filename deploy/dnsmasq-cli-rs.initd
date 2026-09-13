@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+
+name="dnsmasq-cli-rs ingest"
+description="dnsmasq query log -> SQLite ingester"
+
+command="/usr/local/bin/dnsmasq-cli-rs"
+command_args="ingest --log /var/log/dnsmasq.log --db /var/lib/dnsmasq-cli-rs/logs.db --retention-days 30"
+command_user="user"
+command_background="yes"
+pidfile="/run/dnsmasq-cli-rs.pid"
+# 出力先は command_user が書き込める場所にする (/var/log は root 所有のため不可)
+output_log="/var/lib/dnsmasq-cli-rs/ingest.log"
+error_log="/var/lib/dnsmasq-cli-rs/ingest.log"
+
+depend() {
+    need dnsmasq
+    after dnsmasq
+}

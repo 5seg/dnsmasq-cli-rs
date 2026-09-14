@@ -259,7 +259,8 @@ impl Store {
 
         let domains = self.top(
             "SELECT domain, COUNT(*) c, SUM(outcome = 'blocked') b
-             FROM queries WHERE ts >= ?1 GROUP BY domain ORDER BY c DESC LIMIT ?2",
+             FROM queries WHERE ts >= ?1 AND outcome != 'blocked'
+             GROUP BY domain ORDER BY c DESC LIMIT ?2",
             from_ms,
             top,
         )?;

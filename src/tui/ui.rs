@@ -213,9 +213,9 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .map(|c| (c.key.clone(), c.count, c.blocked))
                 .collect::<Vec<_>>(),
-            s.total,
+            (s.total - s.blocked).max(0),
             Color::Cyan,
-            true,
+            false,
         ),
         row1[0],
     );

@@ -288,11 +288,10 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         _ => Color::Green, // forwarded
     };
 
-    // 左が古い日になるよう並べ直す。
+    // 直近の日を左→右 (古い→新しい) に並べる。
     let labels: Vec<String> = app
         .daily
         .iter()
-        .rev()
         .map(|d| fmt_date(d.day_ms).get(5..).unwrap_or("").to_string())
         .collect();
 
@@ -315,7 +314,6 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
     let q_items: Vec<Vec<(i64, Color)>> = app
         .daily
         .iter()
-        .rev()
         .map(|d| {
             vec![
                 (d.cached, color_q("cached")),
@@ -339,7 +337,6 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
     let b_items: Vec<Vec<(i64, Color)>> = app
         .daily
         .iter()
-        .rev()
         .map(|d| vec![(d.blocked, Color::Red)])
         .collect();
     render_stacked_bars(f, b_inner, &labels, &b_items);
@@ -357,22 +354,21 @@ fn render_stacked_bars(
     }
     // 最下段はラベル行に使う。
     let chart_h = (area.height - 1) as usize;
+    // データが無くてもスロット (余白) は確保する。
     let max_total = items
         .iter()
         .map(|segs| segs.iter().map(|(v, _)| *v).sum::<i64>())
         .max()
-        .unwrap_or(0);
-    if max_total <= 0 {
-        return;
-    }
+        .unwrap_or(0)
+        .max(1);
 
     let n = items.len() as u16;
     let slot = area.width / n;
     if slot == 0 {
         return;
     }
-    // 棒間に 1 セル以上のマージンを残す。
-    let bar_w = slot.saturating_sub(2).max(1);
+    // 棒は太くなりすぎないよう上限を設け、スロット内で中央に置く。
+    let bar_w = slot.saturating_sub(2).min(8).max(1);
     let buf = f.buffer_mut();
 
     for (i, segs) in items.iter().enumerate() {

@@ -49,6 +49,19 @@ pub struct DayRow {
     pub blocked: i64,
 }
 
+impl DayRow {
+    /// データの無い日のためのゼロ行。
+    pub fn zeros(day_ms: i64) -> Self {
+        DayRow {
+            day_ms,
+            cached: 0,
+            reply: 0,
+            forwarded: 0,
+            blocked: 0,
+        }
+    }
+}
+
 impl Store {
     /// 書き込み用に開く (ingest 用)。親ディレクトリが無ければ作る。
     pub fn open_rw(path: &str) -> Result<Self> {

@@ -20,7 +20,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// 統計を再集計する間隔。
 const STATS_INTERVAL: Duration = Duration::from_secs(3);
 /// Daily タブで表示する日数。
-const DAILY_DAYS: i64 = 14;
+const DAILY_DAYS: i64 = 7;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -213,9 +213,19 @@ impl App {
     fn refresh_stats(&mut self) -> Result<()> {
         let from = now_millis() - self.period.ms();
         self.summary = self.store.summary(from, self.cfg.top)?;
+        // 直近 DAILY_DAYS 日を固定スロットで用意する (データの無い日はゼロ)。
         let today = now_millis() / 86_400_000;
-        let day_from = (today - (DAILY_DAYS - 1)) * 86_400_000;
-        self.daily = self.store.daily(day_from, DAILY_DAYS)?;
+        let start = today - (DAILY_DAYS - 1);
+        let rows = self.store.daily(start * 86_400_000, DAILY_DAYS)?;
+        self.daily = (0..DAILY_DAYS)
+            .map(|i| {
+                let ms = (start + i) * 86_400_000;
+                rows.iter()
+                    .find(|r| r.day_ms == ms)
+                    .cloned()
+                    .unwrap_or_else(|| DayRow::zeros(ms))
+            })
+            .collect();
         self.last_stats = Instant::now();
         Ok(())
     }

@@ -49,13 +49,6 @@ pub struct DayRow {
     pub blocked: i64,
 }
 
-impl DayRow {
-    /// cached/reply/forwarded の合計。
-    pub fn resolved(&self) -> i64 {
-        self.cached + self.reply + self.forwarded
-    }
-}
-
 impl Store {
     /// 書き込み用に開く (ingest 用)。親ディレクトリが無ければ作る。
     pub fn open_rw(path: &str) -> Result<Self> {

@@ -4,12 +4,13 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, TableState, Tabs,
+    Bar, BarChart, BarGroup, Block, BorderType, Borders, Cell, Clear, Gauge, Paragraph, Row, Table,
+    TableState, Tabs,
 };
 use ratatui::Frame;
 
 use crate::model::Outcome;
-use crate::store::DbRow;
+use crate::store::{DbRow, DayRow};
 use crate::util::{fmt_date, fmt_time};
 
 use super::{App, Tab};
@@ -273,77 +274,99 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// 日別統計: 上にクエリ数 (cached/reply/forwarded)、下にブロック数。
+/// 日別統計: 上にクエリ数 (cached/reply/forwarded)、下にブロック数を棒グラフで表示。
 fn render_daily(f: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
+        Constraint::Percentage(55),
+        Constraint::Percentage(45),
     ])
     .split(area);
 
-    let header = |cols: Vec<&'static str>| {
-        Row::new(cols)
-            .style(Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD))
+    // 左が古い日になるよう並べ直す。
+    let days: Vec<&DayRow> = app.daily.iter().rev().collect();
+    let labels: Vec<String> = days
+        .iter()
+        .map(|d| fmt_date(d.day_ms).get(5..).unwrap_or("").to_string())
+        .collect();
+
+    let color_q = |o: &str| match o {
+        "cached" => Color::Yellow,
+        "reply" => Color::Blue,
+        _ => Color::Green, // forwarded
     };
 
-    let q_rows: Vec<Row> = app
-        .daily
+    let q_groups: Vec<BarGroup> = days
         .iter()
-        .map(|d| {
-            Row::new(vec![
-                Cell::from(fmt_date(d.day_ms)),
-                Cell::from(d.cached.to_string()),
-                Cell::from(d.reply.to_string()),
-                Cell::from(d.forwarded.to_string()),
-                Cell::from(d.resolved().to_string()),
-            ])
+        .zip(&labels)
+        .map(|(d, lab)| {
+            let bars = vec![
+                daily_bar(d.cached, color_q("cached")),
+                daily_bar(d.reply, color_q("reply")),
+                daily_bar(d.forwarded, color_q("forwarded")),
+            ];
+            BarGroup::with_label(lab.as_str(), bars)
         })
         .collect();
+    let q_title = Line::from(vec![
+        Span::raw(" Query counts by day  "),
+        Span::styled("■ cached", Style::default().fg(color_q("cached"))),
+        Span::raw(" "),
+        Span::styled("■ reply", Style::default().fg(color_q("reply"))),
+        Span::raw(" "),
+        Span::styled("■ forwarded", Style::default().fg(color_q("forwarded"))),
+        Span::raw(" "),
+    ]);
     f.render_widget(
-        Table::new(
-            q_rows,
-            [
-                Constraint::Length(12),
-                Constraint::Length(10),
-                Constraint::Length(10),
-                Constraint::Length(12),
-                Constraint::Length(10),
-            ],
-        )
-        .header(header(vec!["date", "cached", "reply", "forwarded", "total"]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" Query counts by day "),
-        ),
+        BarChart::grouped(q_groups)
+            .bar_width(3)
+            .bar_gap(0)
+            .group_gap(0)
+            .style(Style::default().fg(Color::Gray))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(q_title),
+            ),
         rows[0],
     );
 
-    let b_rows: Vec<Row> = app
-        .daily
+    let b_groups: Vec<BarGroup> = days
         .iter()
-        .map(|d| {
-            Row::new(vec![
-                Cell::from(fmt_date(d.day_ms)),
-                Cell::from(d.blocked.to_string()),
-            ])
+        .zip(&labels)
+        .map(|(d, lab)| {
+            let bar = Bar::default()
+                .value(d.blocked.max(0) as u64)
+                .text_value(d.blocked.to_string())
+                .style(Style::default().fg(Color::Red))
+                .value_style(Style::default().fg(Color::Black).bg(Color::Red));
+            BarGroup::with_label(lab.as_str(), vec![bar])
         })
         .collect();
     f.render_widget(
-        Table::new(
-            b_rows,
-            [Constraint::Length(12), Constraint::Length(10)],
-        )
-        .header(header(vec!["date", "blocked"]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" Blocked by day "),
-        ),
+        BarChart::grouped(b_groups)
+            .bar_width(4)
+            .bar_gap(0)
+            .group_gap(1)
+            .style(Style::default().fg(Color::Gray))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Line::from(Span::styled(
+                        " Blocked by day ",
+                        Style::default().fg(Color::Red),
+                    ))),
+            ),
         rows[1],
     );
+}
+
+fn daily_bar(value: i64, color: Color) -> Bar<'static> {
+    Bar::default()
+        .value(value.max(0) as u64)
+        .text_value("")
+        .style(Style::default().fg(color))
 }
 
 fn outcome_color(name: &str) -> Color {

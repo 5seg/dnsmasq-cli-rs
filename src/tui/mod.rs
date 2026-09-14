@@ -57,6 +57,43 @@ impl Period {
     }
 }
 
+/// ブロック行の表示フィルタ (`b` キーで巡回)。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BlockFilter {
+    /// 全件表示。
+    Default,
+    /// ブロック行のみ。
+    Only,
+    /// ブロック行を除外。
+    Exclude,
+}
+
+impl BlockFilter {
+    fn next(self) -> Self {
+        match self {
+            BlockFilter::Default => BlockFilter::Only,
+            BlockFilter::Only => BlockFilter::Exclude,
+            BlockFilter::Exclude => BlockFilter::Default,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            BlockFilter::Default => "blocked: all",
+            BlockFilter::Only => "blocked-only",
+            BlockFilter::Exclude => "blocked excluded",
+        }
+    }
+
+    fn allows(self, blocked: bool) -> bool {
+        match self {
+            BlockFilter::Default => true,
+            BlockFilter::Only => blocked,
+            BlockFilter::Exclude => !blocked,
+        }
+    }
+}
+
 pub enum InputMode {
     Search,
     Client,
@@ -82,7 +119,7 @@ pub struct App {
 
     pub search: String,
     pub client_filter: String,
-    pub blocked_only: bool,
+    pub block_filter: BlockFilter,
     pub paused: bool,
 
     /// フィルタ後の並びにおける先頭表示位置。
@@ -113,7 +150,7 @@ impl App {
             summary: Summary::default(),
             search: String::new(),
             client_filter: String::new(),
-            blocked_only: false,
+            block_filter: BlockFilter::Default,
             paused: false,
             scroll: 0,
             cursor: 0,
@@ -188,7 +225,7 @@ impl App {
             .iter()
             .enumerate()
             .filter(|(_, r)| {
-                (!self.blocked_only || r.ev.outcome.is_blocked())
+                self.block_filter.allows(r.ev.outcome.is_blocked())
                     && (q.is_empty() || r.ev.domain.to_lowercase().contains(&q))
                     && (c.is_empty() || r.ev.client.to_lowercase().contains(&c))
             })
@@ -297,7 +334,7 @@ impl App {
                 // フィルタをリセット
                 self.search.clear();
                 self.client_filter.clear();
-                self.blocked_only = false;
+                self.block_filter = BlockFilter::Default;
             }
             KeyCode::Tab => {
                 self.tab = match self.tab {
@@ -318,8 +355,8 @@ impl App {
                 let _ = self.refresh_stats();
             }
             KeyCode::Char('b') => {
-                self.blocked_only = !self.blocked_only;
-                self.status = format!("blocked-only: {}", self.blocked_only);
+                self.block_filter = self.block_filter.next();
+                self.status = self.block_filter.label().to_string();
                 self.jump_to_end();
             }
             KeyCode::Char('p') => {
@@ -388,8 +425,8 @@ impl App {
         if !self.client_filter.is_empty() {
             parts.push(format!("client:{:?}", self.client_filter));
         }
-        if self.blocked_only {
-            parts.push("blocked-only".to_string());
+        if self.block_filter != BlockFilter::Default {
+            parts.push(self.block_filter.label().to_string());
         }
         if self.paused {
             parts.push("PAUSED".to_string());

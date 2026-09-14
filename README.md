@@ -174,7 +174,7 @@ dnsmasq-cli-rs prune --older-than 90d --apply --vacuum
 | `Home` / `End` (or `g` / `G`) | Jump to top / bottom. |
 | `/` | Search domains (substring, case-insensitive). |
 | `c` | Filter by client. |
-| `b` | Toggle blocked-only. |
+| `b` | Cycle the block filter: all → blocked only → exclude blocked. |
 | `p` | Pause/resume the live feed. |
 | `Esc` | Reset all filters. |
 | `1` / `2` / `3` | Stats window: 1 h / 24 h / 7 d. |

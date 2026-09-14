@@ -232,15 +232,12 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
         upper[1],
     );
     f.render_widget(
-        counts_block(
-            " Outcomes ",
+        outcomes_stacked_block(
+            " Outcomes (excl. blocked) ",
             &s.outcomes
                 .iter()
-                .map(|c| (c.key.clone(), c.count, c.blocked))
+                .map(|c| (c.key.clone(), c.count))
                 .collect::<Vec<_>>(),
-            s.total,
-            Color::Cyan,
-            Some(&outcome_name_color),
         ),
         lower[0],
     );
@@ -259,7 +256,7 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn outcome_name_color(name: &str) -> Color {
+fn outcome_color(name: &str) -> Color {
     match name {
         "blocked" => Color::Red,
         "forwarded" => Color::Green,
@@ -269,6 +266,62 @@ fn outcome_name_color(name: &str) -> Color {
         "unknown" => Color::DarkGray,
         _ => Color::Cyan,
     }
+}
+
+/// Outcomes を 1 本の積み上げバーで表示する (blocked は除外)。
+fn outcomes_stacked_block(title: &str, items: &[(String, i64)]) -> Paragraph<'static> {
+    const BAR_WIDTH: usize = 48;
+    let items: Vec<(&str, i64)> = items
+        .iter()
+        .filter(|(k, _)| *k != "blocked")
+        .map(|(k, c)| (k.as_str(), *c))
+        .collect();
+    let total: i64 = items.iter().map(|(_, c)| *c).sum();
+    if items.is_empty() || total <= 0 {
+        return Paragraph::new(Text::from(Line::from(Span::styled(
+            "(no data)",
+            Style::default().fg(Color::DarkGray),
+        ))))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(title.to_string()),
+        );
+    }
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (i, (name, count)) in items.iter().enumerate() {
+        let w = (((*count as f64 / total as f64) * BAR_WIDTH as f64).round() as usize)
+            .max(1)
+            .min(BAR_WIDTH);
+        if i > 0 {
+            spans.push(Span::raw("|"));
+        }
+        spans.push(Span::styled(
+            "█".repeat(w),
+            Style::default().fg(outcome_color(name)),
+        ));
+    }
+    let mut lines = vec![Line::from(spans)];
+
+    for (name, count) in &items {
+        let pct = *count as f64 / total as f64 * 100.0;
+        lines.push(Line::from(vec![
+            Span::styled("■ ".to_string(), Style::default().fg(outcome_color(name))),
+            Span::styled(
+                format!("{name:<12} {count:>5} {pct:>5.1}%"),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+    }
+
+    Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(title.to_string()),
+    )
 }
 
 fn counts_block(

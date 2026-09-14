@@ -4,7 +4,8 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, TableState, Tabs,
+    Block, BorderType, Borders, Cell, Clear, Gauge, Padding, Paragraph, Row, Table, TableState,
+    Tabs,
 };
 use ratatui::Frame;
 
@@ -295,6 +296,7 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         .map(|d| fmt_date(d.day_ms).get(5..).unwrap_or("").to_string())
         .collect();
 
+    // クエリ数のパネル (棒グラフ | 数値リスト)
     let q_title = Line::from(vec![
         Span::raw(" Query counts by day  "),
         Span::styled("■ cached", Style::default().fg(color_q("cached"))),
@@ -322,8 +324,44 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
             ]
         })
         .collect();
-    render_stacked_bars(f, q_inner, &labels, &q_items);
+    // 数値リストは最新が上。
+    let q_lines: Vec<Line> = app
+        .daily
+        .iter()
+        .rev()
+        .map(|d| {
+            Line::from(vec![
+                Span::styled(
+                    fmt_date(d.day_ms).get(5..).unwrap_or("").to_string(),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("cached:{:>3}", d.cached),
+                    Style::default().fg(color_q("cached")),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("reply:{:>3}", d.reply),
+                    Style::default().fg(color_q("reply")),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("forwarded:{:>3}", d.forwarded),
+                    Style::default().fg(color_q("forwarded")),
+                ),
+            ])
+        })
+        .collect();
+    let q_cols = Layout::horizontal([
+        Constraint::Min(10),
+        Constraint::Length(46.min(q_inner.width.saturating_sub(20))),
+    ])
+    .split(q_inner);
+    render_stacked_bars(f, q_cols[0], &labels, &q_items);
+    render_numbers(f, q_cols[1], q_lines);
 
+    // ブロック数のパネル (棒グラフ | 数値リスト)
     let b_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -339,7 +377,42 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|d| vec![(d.blocked, Color::Red)])
         .collect();
-    render_stacked_bars(f, b_inner, &labels, &b_items);
+    let b_lines: Vec<Line> = app
+        .daily
+        .iter()
+        .rev()
+        .map(|d| {
+            Line::from(vec![
+                Span::styled(
+                    fmt_date(d.day_ms).get(5..).unwrap_or("").to_string(),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("blocked:{:>3}", d.blocked),
+                    Style::default().fg(Color::Red),
+                ),
+            ])
+        })
+        .collect();
+    let b_cols = Layout::horizontal([
+        Constraint::Min(10),
+        Constraint::Length(24.min(b_inner.width.saturating_sub(20))),
+    ])
+    .split(b_inner);
+    render_stacked_bars(f, b_cols[0], &labels, &b_items);
+    render_numbers(f, b_cols[1], b_lines);
+}
+
+/// 数値リストを左罫線付きで描く。
+fn render_numbers(f: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
+    let p = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .borders(Borders::LEFT)
+            .border_type(BorderType::Rounded)
+            .padding(Padding::horizontal(1)),
+    );
+    f.render_widget(p, area);
 }
 
 /// 日ごとに 1 本の積み上げ棒を描く。各棒はセグメント (値, 色) を下から積む。

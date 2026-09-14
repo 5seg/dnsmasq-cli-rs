@@ -39,8 +39,9 @@ dependencies — a good fit for a small VPS or a home gateway.
 - **Statistics** — top domains (excluding blocked), top blocked domains, top clients,
   resolution outcomes (cached/reply/forwarded/…), and query types, each with counts and
   percentages, plus the block rate over a 1 h / 24 h / 7 d window.
-- **Daily breakdown** — a per-day stacked bar chart with query counts
-  (cached/reply/forwarded) and blocked counts.
+- **Daily breakdown** — a per-day stacked bar chart for the last 7 days with query
+  counts (cached/reply/forwarded) and blocked counts, each beside a per-day numeric
+  list (newest first).
 - **Search and filters** — substring domain search, client filter, and a
   blocked-only toggle, all applied instantly.
 - **Whitelist management** — add the selected domain to a whitelist and reload dnsmasq

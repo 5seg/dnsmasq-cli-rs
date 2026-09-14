@@ -324,11 +324,12 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
             ]
         })
         .collect();
-    // 数値リストは最新が上。
+    // 数値リストは最新が上。データの無い日は出さない。
     let q_lines: Vec<Line> = app
         .daily
         .iter()
         .rev()
+        .filter(|d| d.cached + d.reply + d.forwarded > 0)
         .map(|d| {
             Line::from(vec![
                 Span::styled(
@@ -381,6 +382,7 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         .daily
         .iter()
         .rev()
+        .filter(|d| d.blocked > 0)
         .map(|d| {
             Line::from(vec![
                 Span::styled(

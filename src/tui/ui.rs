@@ -188,15 +188,22 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
         ));
     f.render_widget(gauge, rows[0]);
 
-    // 下段を左右 2 カラム + qtype
-    let cols = Layout::horizontal([
+    // 下段を 2x2 グリッド (上: domains/clients, 下: outcomes/qtypes)
+    let body = Layout::vertical([
+        Constraint::Percentage(60),
+        Constraint::Percentage(40),
+    ])
+    .split(rows[1]);
+    let upper = Layout::horizontal([
         Constraint::Percentage(50),
         Constraint::Percentage(50),
     ])
-    .split(rows[1]);
-
-    let left = Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(cols[0]);
+    .split(body[0]);
+    let lower = Layout::horizontal([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .split(body[1]);
 
     f.render_widget(
         counts_block(
@@ -205,9 +212,11 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .map(|c| (c.key.clone(), c.count, c.blocked))
                 .collect::<Vec<_>>(),
+            s.total,
             Color::Cyan,
+            None,
         ),
-        left[0],
+        upper[0],
     );
     f.render_widget(
         counts_block(
@@ -216,33 +225,77 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .map(|c| (c.key.clone(), c.count, c.blocked))
                 .collect::<Vec<_>>(),
+            s.total,
             Color::Green,
+            None,
         ),
-        cols[1],
+        upper[1],
     );
     f.render_widget(
         counts_block(
-            " qtypes ",
+            " Outcomes ",
+            &s.outcomes
+                .iter()
+                .map(|c| (c.key.clone(), c.count, c.blocked))
+                .collect::<Vec<_>>(),
+            s.total,
+            Color::Cyan,
+            Some(&outcome_name_color),
+        ),
+        lower[0],
+    );
+    f.render_widget(
+        counts_block(
+            " Query types ",
             &s.qtypes
                 .iter()
                 .map(|c| (c.key.clone(), c.count, c.blocked))
                 .collect::<Vec<_>>(),
+            s.total,
             Color::Magenta,
+            None,
         ),
-        left[1],
+        lower[1],
     );
 }
 
-fn counts_block(title: &str, items: &[(String, i64, i64)], color: Color) -> Paragraph<'static> {
+fn outcome_name_color(name: &str) -> Color {
+    match name {
+        "blocked" => Color::Red,
+        "forwarded" => Color::Green,
+        "cached" => Color::Yellow,
+        "reply" => Color::Blue,
+        "hosts" => Color::Magenta,
+        "unknown" => Color::DarkGray,
+        _ => Color::Cyan,
+    }
+}
+
+fn counts_block(
+    title: &str,
+    items: &[(String, i64, i64)],
+    total: i64,
+    color: Color,
+    key_color: Option<&dyn Fn(&str) -> Color>,
+) -> Paragraph<'static> {
     let max = items.iter().map(|(_, c, _)| *c).max().unwrap_or(1).max(1);
     let mut lines: Vec<Line> = Vec::new();
     for (key, count, blocked) in items {
-        let bar = bar(*count, max, 14);
+        let bar = bar(*count, max, 12);
+        let pct = if total > 0 {
+            *count as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
+        let kc = key_color.map(|f| f(key)).unwrap_or(color);
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<32}", truncate(key, 32)), Style::default().fg(color)),
+            Span::styled(format!("{:<20}", truncate(key, 20)), Style::default().fg(kc)),
             Span::raw(" "),
-            Span::styled(bar, Style::default().fg(color)),
-            Span::styled(format!(" {count}"), Style::default().fg(Color::White)),
+            Span::styled(bar, Style::default().fg(kc)),
+            Span::styled(
+                format!(" {count:>5} {pct:>5.1}%"),
+                Style::default().fg(Color::White),
+            ),
             if *blocked > 0 {
                 Span::styled(
                     format!(" ({blocked} blk)"),

@@ -27,6 +27,7 @@ pub struct Summary {
     pub domains: Vec<CountRow>,
     pub clients: Vec<CountRow>,
     pub qtypes: Vec<CountRow>,
+    pub outcomes: Vec<CountRow>,
 }
 
 /// 集計の 1 行 (key と件数、任意でブロック数)。
@@ -273,6 +274,12 @@ impl Store {
             from_ms,
             top,
         )?;
+        let outcomes = self.top(
+            "SELECT outcome, COUNT(*) c, SUM(outcome = 'blocked') b
+             FROM queries WHERE ts >= ?1 GROUP BY outcome ORDER BY c DESC LIMIT ?2",
+            from_ms,
+            -1,
+        )?;
 
         Ok(Summary {
             total,
@@ -280,6 +287,7 @@ impl Store {
             domains,
             clients,
             qtypes,
+            outcomes,
         })
     }
 

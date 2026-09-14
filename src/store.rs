@@ -25,6 +25,7 @@ pub struct Summary {
     pub total: i64,
     pub blocked: i64,
     pub domains: Vec<CountRow>,
+    pub blocked_domains: Vec<CountRow>,
     pub clients: Vec<CountRow>,
     pub qtypes: Vec<CountRow>,
     pub outcomes: Vec<CountRow>,
@@ -262,6 +263,13 @@ impl Store {
             from_ms,
             top,
         )?;
+        let blocked_domains = self.top(
+            "SELECT domain, COUNT(*) c, SUM(outcome = 'blocked') b
+             FROM queries WHERE ts >= ?1 AND outcome = 'blocked'
+             GROUP BY domain ORDER BY c DESC LIMIT ?2",
+            from_ms,
+            top,
+        )?;
         let clients = self.top(
             "SELECT client, COUNT(*) c, SUM(outcome = 'blocked') b
              FROM queries WHERE ts >= ?1 GROUP BY client ORDER BY c DESC LIMIT ?2",
@@ -285,6 +293,7 @@ impl Store {
             total,
             blocked,
             domains,
+            blocked_domains,
             clients,
             qtypes,
             outcomes,

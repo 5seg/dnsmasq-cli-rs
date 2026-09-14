@@ -36,9 +36,9 @@ dependencies — a good fit for a small VPS or a home gateway.
   (`blocked`, `forwarded`, `cached`, `reply`, `hosts`, …).
 - **Persistent history** — every query is stored in SQLite, so the view survives
   restarts of both the app and the host.
-- **Statistics** — top domains, top clients, resolution outcomes
-  (blocked/cached/reply/forwarded/…), and query types, each with counts and
-  percentages, plus the block rate over a 1 h / 24 h / 7 d window.
+- **Statistics** — top domains, top blocked domains, top clients, resolution outcomes
+  (cached/reply/forwarded/…), and query types, each with counts and percentages, plus
+  the block rate over a 1 h / 24 h / 7 d window.
 - **Search and filters** — substring domain search, client filter, and a
   blocked-only toggle, all applied instantly.
 - **Whitelist management** — add the selected domain to a whitelist and reload dnsmasq

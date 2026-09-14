@@ -188,18 +188,19 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
         ));
     f.render_widget(gauge, rows[0]);
 
-    // 下段を 2x2 グリッド (上: domains/clients, 下: outcomes/qtypes)
+    // 3 段: domains 系 / clients・qtypes / outcomes (全幅)
     let body = Layout::vertical([
-        Constraint::Percentage(60),
-        Constraint::Percentage(40),
+        Constraint::Percentage(38),
+        Constraint::Percentage(32),
+        Constraint::Percentage(30),
     ])
     .split(rows[1]);
-    let upper = Layout::horizontal([
+    let row1 = Layout::horizontal([
         Constraint::Percentage(50),
         Constraint::Percentage(50),
     ])
     .split(body[0]);
-    let lower = Layout::horizontal([
+    let row2 = Layout::horizontal([
         Constraint::Percentage(50),
         Constraint::Percentage(50),
     ])
@@ -214,9 +215,22 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
                 .collect::<Vec<_>>(),
             s.total,
             Color::Cyan,
-            None,
+            true,
         ),
-        upper[0],
+        row1[0],
+    );
+    f.render_widget(
+        counts_block(
+            " Top blocked domains ",
+            &s.blocked_domains
+                .iter()
+                .map(|c| (c.key.clone(), c.count, c.blocked))
+                .collect::<Vec<_>>(),
+            s.blocked,
+            Color::Red,
+            false,
+        ),
+        row1[1],
     );
     f.render_widget(
         counts_block(
@@ -227,19 +241,9 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
                 .collect::<Vec<_>>(),
             s.total,
             Color::Green,
-            None,
+            true,
         ),
-        upper[1],
-    );
-    f.render_widget(
-        outcomes_stacked_block(
-            " Outcomes (excl. blocked) ",
-            &s.outcomes
-                .iter()
-                .map(|c| (c.key.clone(), c.count))
-                .collect::<Vec<_>>(),
-        ),
-        lower[0],
+        row2[0],
     );
     f.render_widget(
         counts_block(
@@ -250,9 +254,19 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
                 .collect::<Vec<_>>(),
             s.total,
             Color::Magenta,
-            None,
+            true,
         ),
-        lower[1],
+        row2[1],
+    );
+    f.render_widget(
+        outcomes_stacked_block(
+            " Outcomes (excl. blocked) ",
+            &s.outcomes
+                .iter()
+                .map(|c| (c.key.clone(), c.count))
+                .collect::<Vec<_>>(),
+        ),
+        body[2],
     );
 }
 
@@ -329,7 +343,7 @@ fn counts_block(
     items: &[(String, i64, i64)],
     total: i64,
     color: Color,
-    key_color: Option<&dyn Fn(&str) -> Color>,
+    show_blocked: bool,
 ) -> Paragraph<'static> {
     let max = items.iter().map(|(_, c, _)| *c).max().unwrap_or(1).max(1);
     let mut lines: Vec<Line> = Vec::new();
@@ -340,16 +354,15 @@ fn counts_block(
         } else {
             0.0
         };
-        let kc = key_color.map(|f| f(key)).unwrap_or(color);
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<20}", truncate(key, 20)), Style::default().fg(kc)),
+            Span::styled(format!("{:<20}", truncate(key, 20)), Style::default().fg(color)),
             Span::raw(" "),
-            Span::styled(bar, Style::default().fg(kc)),
+            Span::styled(bar, Style::default().fg(color)),
             Span::styled(
                 format!(" {count:>5} {pct:>5.1}%"),
                 Style::default().fg(Color::White),
             ),
-            if *blocked > 0 {
+            if show_blocked && *blocked > 0 {
                 Span::styled(
                     format!(" ({blocked} blk)"),
                     Style::default().fg(Color::Red),

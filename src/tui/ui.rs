@@ -4,13 +4,12 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Bar, BarChart, BarGroup, Block, BorderType, Borders, Cell, Clear, Gauge, Paragraph, Row, Table,
-    TableState, Tabs,
+    Block, BorderType, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, TableState, Tabs,
 };
 use ratatui::Frame;
 
 use crate::model::Outcome;
-use crate::store::{DbRow, DayRow};
+use crate::store::DbRow;
 use crate::util::{fmt_date, fmt_time};
 
 use super::{App, Tab};
@@ -274,7 +273,8 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// 日別統計: 上にクエリ数 (cached/reply/forwarded)、下にブロック数を棒グラフで表示。
+/// 日別統計: 上にクエリ数 (cached/reply/forwarded)、下にブロック数を
+/// 1 日 1 本の積み上げ棒で表示する。
 fn render_daily(f: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
         Constraint::Percentage(55),
@@ -282,31 +282,20 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
     ])
     .split(area);
 
-    // 左が古い日になるよう並べ直す。
-    let days: Vec<&DayRow> = app.daily.iter().rev().collect();
-    let labels: Vec<String> = days
-        .iter()
-        .map(|d| fmt_date(d.day_ms).get(5..).unwrap_or("").to_string())
-        .collect();
-
     let color_q = |o: &str| match o {
         "cached" => Color::Yellow,
         "reply" => Color::Blue,
         _ => Color::Green, // forwarded
     };
 
-    let q_groups: Vec<BarGroup> = days
+    // 左が古い日になるよう並べ直す。
+    let labels: Vec<String> = app
+        .daily
         .iter()
-        .zip(&labels)
-        .map(|(d, lab)| {
-            let bars = vec![
-                daily_bar(d.cached, color_q("cached")),
-                daily_bar(d.reply, color_q("reply")),
-                daily_bar(d.forwarded, color_q("forwarded")),
-            ];
-            BarGroup::with_label(lab.as_str(), bars)
-        })
+        .rev()
+        .map(|d| fmt_date(d.day_ms).get(5..).unwrap_or("").to_string())
         .collect();
+
     let q_title = Line::from(vec![
         Span::raw(" Query counts by day  "),
         Span::styled("■ cached", Style::default().fg(color_q("cached"))),
@@ -316,57 +305,116 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("■ forwarded", Style::default().fg(color_q("forwarded"))),
         Span::raw(" "),
     ]);
-    f.render_widget(
-        BarChart::grouped(q_groups)
-            .bar_width(3)
-            .bar_gap(0)
-            .group_gap(0)
-            .style(Style::default().fg(Color::Gray))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .title(q_title),
-            ),
-        rows[0],
-    );
+    let q_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(q_title);
+    let q_inner = q_block.inner(rows[0]);
+    f.render_widget(q_block, rows[0]);
 
-    let b_groups: Vec<BarGroup> = days
+    let q_items: Vec<Vec<(i64, Color)>> = app
+        .daily
         .iter()
-        .zip(&labels)
-        .map(|(d, lab)| {
-            let bar = Bar::default()
-                .value(d.blocked.max(0) as u64)
-                .text_value(d.blocked.to_string())
-                .style(Style::default().fg(Color::Red))
-                .value_style(Style::default().fg(Color::Black).bg(Color::Red));
-            BarGroup::with_label(lab.as_str(), vec![bar])
+        .rev()
+        .map(|d| {
+            vec![
+                (d.cached, color_q("cached")),
+                (d.reply, color_q("reply")),
+                (d.forwarded, color_q("forwarded")),
+            ]
         })
         .collect();
-    f.render_widget(
-        BarChart::grouped(b_groups)
-            .bar_width(4)
-            .bar_gap(0)
-            .group_gap(1)
-            .style(Style::default().fg(Color::Gray))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .title(Line::from(Span::styled(
-                        " Blocked by day ",
-                        Style::default().fg(Color::Red),
-                    ))),
-            ),
-        rows[1],
-    );
+    render_stacked_bars(f, q_inner, &labels, &q_items);
+
+    let b_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(Line::from(Span::styled(
+            " Blocked by day ",
+            Style::default().fg(Color::Red),
+        )));
+    let b_inner = b_block.inner(rows[1]);
+    f.render_widget(b_block, rows[1]);
+
+    let b_items: Vec<Vec<(i64, Color)>> = app
+        .daily
+        .iter()
+        .rev()
+        .map(|d| vec![(d.blocked, Color::Red)])
+        .collect();
+    render_stacked_bars(f, b_inner, &labels, &b_items);
 }
 
-fn daily_bar(value: i64, color: Color) -> Bar<'static> {
-    Bar::default()
-        .value(value.max(0) as u64)
-        .text_value("")
-        .style(Style::default().fg(color))
+/// 日ごとに 1 本の積み上げ棒を描く。各棒はセグメント (値, 色) を下から積む。
+fn render_stacked_bars(
+    f: &mut Frame,
+    area: Rect,
+    labels: &[String],
+    items: &[Vec<(i64, Color)>],
+) {
+    if items.is_empty() || area.width == 0 || area.height < 2 {
+        return;
+    }
+    // 最下段はラベル行に使う。
+    let chart_h = (area.height - 1) as usize;
+    let max_total = items
+        .iter()
+        .map(|segs| segs.iter().map(|(v, _)| *v).sum::<i64>())
+        .max()
+        .unwrap_or(0);
+    if max_total <= 0 {
+        return;
+    }
+
+    let n = items.len() as u16;
+    let slot = area.width / n;
+    if slot == 0 {
+        return;
+    }
+    // 棒間に 1 セル以上のマージンを残す。
+    let bar_w = slot.saturating_sub(2).max(1);
+    let buf = f.buffer_mut();
+
+    for (i, segs) in items.iter().enumerate() {
+        let x0 = area.x + i as u16 * slot + (slot - bar_w) / 2;
+
+        // ラベルは値が 0 の日でも描く。
+        if let Some(label) = labels.get(i) {
+            let ly = area.y + area.height - 1;
+            let text = truncate(label, slot as usize);
+            let lx = area.x + i as u16 * slot + slot.saturating_sub(text.len() as u16) / 2;
+            buf.set_string(lx, ly, &text, Style::default().fg(Color::DarkGray));
+        }
+
+        let total: i64 = segs.iter().map(|(v, _)| *v).sum();
+        if total <= 0 {
+            continue;
+        }
+        let cells = (((total as f64 / max_total as f64) * chart_h as f64).round() as usize)
+            .clamp(1, chart_h);
+
+        let mut filled = 0usize;
+        let mut acc = 0f64;
+        let mut y = area.y + chart_h as u16;
+        for (si, (v, color)) in segs.iter().enumerate() {
+            let seg = if si + 1 == segs.len() {
+                cells - filled
+            } else {
+                acc += *v as f64 / total as f64 * cells as f64;
+                (acc.round() as usize).saturating_sub(filled)
+            };
+            for _ in 0..seg {
+                if y <= area.y {
+                    break;
+                }
+                y -= 1;
+                for dx in 0..bar_w {
+                    buf.set_string(x0 + dx, y, "█", Style::default().fg(*color));
+                }
+            }
+            filled = (filled + seg).min(cells);
+        }
+    }
 }
 
 fn outcome_color(name: &str) -> Color {

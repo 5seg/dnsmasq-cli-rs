@@ -338,17 +338,17 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("cached:{:>3}", d.cached),
+                    format!("cached:{:>5}", d.cached),
                     Style::default().fg(color_q("cached")),
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("reply:{:>3}", d.reply),
+                    format!("reply:{:>5}", d.reply),
                     Style::default().fg(color_q("reply")),
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("forwarded:{:>3}", d.forwarded),
+                    format!("forwarded:{:>5}", d.forwarded),
                     Style::default().fg(color_q("forwarded")),
                 ),
             ])
@@ -356,7 +356,7 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         .collect();
     let q_cols = Layout::horizontal([
         Constraint::Min(10),
-        Constraint::Length(46.min(q_inner.width.saturating_sub(20))),
+        Constraint::Length(54.min(q_inner.width.saturating_sub(20))),
     ])
     .split(q_inner);
     render_stacked_bars(f, q_cols[0], &labels, &q_items);
@@ -391,7 +391,7 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("blocked:{:>3}", d.blocked),
+                    format!("blocked:{:>5}", d.blocked),
                     Style::default().fg(Color::Red),
                 ),
             ])
@@ -399,7 +399,7 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         .collect();
     let b_cols = Layout::horizontal([
         Constraint::Min(10),
-        Constraint::Length(24.min(b_inner.width.saturating_sub(20))),
+        Constraint::Length(26.min(b_inner.width.saturating_sub(20))),
     ])
     .split(b_inner);
     render_stacked_bars(f, b_cols[0], &labels, &b_items);
@@ -429,6 +429,8 @@ fn render_stacked_bars(
     }
     // 最下段はラベル行に使う。
     let chart_h = (area.height - 1) as usize;
+    // 最上段は余白にして、最大の棒でも枠に接しないようにする。
+    let scale_h = chart_h.saturating_sub(1).max(1);
     // データが無くてもスロット (余白) は確保する。
     let max_total = items
         .iter()
@@ -461,8 +463,9 @@ fn render_stacked_bars(
         if total <= 0 {
             continue;
         }
-        let cells = (((total as f64 / max_total as f64) * chart_h as f64).round() as usize)
-            .clamp(1, chart_h);
+        // 高さは最大の棒を基準に相対計算する (最上段は余白)。
+        let cells = (((total as f64 / max_total as f64) * scale_h as f64).round() as usize)
+            .clamp(1, scale_h);
 
         let mut filled = 0usize;
         let mut acc = 0f64;

@@ -11,7 +11,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use ratatui::DefaultTerminal;
 
 use crate::cli::Config;
-use crate::store::{now_millis, DbRow, Store, Summary};
+use crate::store::{now_millis, DbRow, DayRow, Store, Summary};
 
 /// メモリ上に保持する最大行数。
 const MAX_BUFFER: usize = 20_000;
@@ -19,11 +19,24 @@ const MAX_BUFFER: usize = 20_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// 統計を再集計する間隔。
 const STATS_INTERVAL: Duration = Duration::from_secs(3);
+/// Daily タブで表示する日数。
+const DAILY_DAYS: i64 = 14;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Live,
     Stats,
+    Daily,
+}
+
+impl Tab {
+    fn next(self) -> Tab {
+        match self {
+            Tab::Live => Tab::Stats,
+            Tab::Stats => Tab::Daily,
+            Tab::Daily => Tab::Live,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -116,6 +129,7 @@ pub struct App {
     pub tab: Tab,
     pub period: Period,
     pub summary: Summary,
+    pub daily: Vec<DayRow>,
 
     pub search: String,
     pub client_filter: String,
@@ -148,6 +162,7 @@ impl App {
             tab: Tab::Live,
             period: Period::H24,
             summary: Summary::default(),
+            daily: Vec::new(),
             search: String::new(),
             client_filter: String::new(),
             block_filter: BlockFilter::Default,
@@ -198,6 +213,9 @@ impl App {
     fn refresh_stats(&mut self) -> Result<()> {
         let from = now_millis() - self.period.ms();
         self.summary = self.store.summary(from, self.cfg.top)?;
+        let today = now_millis() / 86_400_000;
+        let day_from = (today - (DAILY_DAYS - 1)) * 86_400_000;
+        self.daily = self.store.daily(day_from, DAILY_DAYS)?;
         self.last_stats = Instant::now();
         Ok(())
     }
@@ -337,10 +355,7 @@ impl App {
                 self.block_filter = BlockFilter::Default;
             }
             KeyCode::Tab => {
-                self.tab = match self.tab {
-                    Tab::Live => Tab::Stats,
-                    Tab::Stats => Tab::Live,
-                }
+                self.tab = self.tab.next();
             }
             KeyCode::Char('1') => {
                 self.period = Period::H1;

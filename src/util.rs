@@ -12,6 +12,12 @@ pub fn fmt_time(ts_ms: i64) -> String {
     format!("{hh:02}:{mm:02}:{ss:02}")
 }
 
+/// unix millis → "YYYY-MM-DD" (UTC)
+pub fn fmt_date(ts_ms: i64) -> String {
+    let (y, m, d, _, _, _) = breakdown(ts_ms);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 fn breakdown(ts_ms: i64) -> (i64, u32, u32, u32, u32, u32) {
     let days = ts_ms.div_euclid(86_400_000);
     let rem = ts_ms.rem_euclid(86_400_000);

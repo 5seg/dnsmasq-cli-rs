@@ -10,7 +10,7 @@ use ratatui::Frame;
 
 use crate::model::Outcome;
 use crate::store::DbRow;
-use crate::util::fmt_time;
+use crate::util::{fmt_date, fmt_time};
 
 use super::{App, Tab};
 
@@ -26,10 +26,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let titles = vec![
         format!(" Live ({}) ", app.filtered_len()),
         format!(" Stats [{}] ", app.period.label()),
+        " Daily ".to_string(),
     ];
     let sel = match app.tab {
         Tab::Live => 0,
         Tab::Stats => 1,
+        Tab::Daily => 2,
     };
     let tabs = Tabs::new(titles)
         .select(sel)
@@ -45,6 +47,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     match app.tab {
         Tab::Live => render_live(f, app, chunks[1]),
         Tab::Stats => render_stats(f, app, chunks[1]),
+        Tab::Daily => render_daily(f, app, chunks[1]),
     }
 
     // ステータス行
@@ -267,6 +270,79 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
                 .collect::<Vec<_>>(),
         ),
         body[2],
+    );
+}
+
+/// 日別統計: 上にクエリ数 (cached/reply/forwarded)、下にブロック数。
+fn render_daily(f: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::vertical([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .split(area);
+
+    let header = |cols: Vec<&'static str>| {
+        Row::new(cols)
+            .style(Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD))
+    };
+
+    let q_rows: Vec<Row> = app
+        .daily
+        .iter()
+        .map(|d| {
+            Row::new(vec![
+                Cell::from(fmt_date(d.day_ms)),
+                Cell::from(d.cached.to_string()),
+                Cell::from(d.reply.to_string()),
+                Cell::from(d.forwarded.to_string()),
+                Cell::from(d.resolved().to_string()),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        Table::new(
+            q_rows,
+            [
+                Constraint::Length(12),
+                Constraint::Length(10),
+                Constraint::Length(10),
+                Constraint::Length(12),
+                Constraint::Length(10),
+            ],
+        )
+        .header(header(vec!["date", "cached", "reply", "forwarded", "total"]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Query counts by day "),
+        ),
+        rows[0],
+    );
+
+    let b_rows: Vec<Row> = app
+        .daily
+        .iter()
+        .map(|d| {
+            Row::new(vec![
+                Cell::from(fmt_date(d.day_ms)),
+                Cell::from(d.blocked.to_string()),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        Table::new(
+            b_rows,
+            [Constraint::Length(12), Constraint::Length(10)],
+        )
+        .header(header(vec!["date", "blocked"]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Blocked by day "),
+        ),
+        rows[1],
     );
 }
 

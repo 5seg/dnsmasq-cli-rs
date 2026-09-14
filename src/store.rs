@@ -39,6 +39,23 @@ pub struct CountRow {
     pub blocked: i64,
 }
 
+/// 日別の集計行 (day_ms は UTC 日の先頭)。
+#[derive(Clone, Debug)]
+pub struct DayRow {
+    pub day_ms: i64,
+    pub cached: i64,
+    pub reply: i64,
+    pub forwarded: i64,
+    pub blocked: i64,
+}
+
+impl DayRow {
+    /// cached/reply/forwarded の合計。
+    pub fn resolved(&self) -> i64 {
+        self.cached + self.reply + self.forwarded
+    }
+}
+
 impl Store {
     /// 書き込み用に開く (ingest 用)。親ディレクトリが無ければ作る。
     pub fn open_rw(path: &str) -> Result<Self> {
@@ -299,6 +316,30 @@ impl Store {
             qtypes,
             outcomes,
         })
+    }
+
+    /// `ts >= from_ms` の行を UTC 日ごとに集計する (新しい日が先頭)。
+    pub fn daily(&self, from_ms: i64, limit: i64) -> Result<Vec<DayRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT (ts / 86400000) d,
+                    SUM(outcome = 'cached'),
+                    SUM(outcome = 'reply'),
+                    SUM(outcome = 'forwarded'),
+                    SUM(outcome = 'blocked')
+             FROM queries WHERE ts >= ?1
+             GROUP BY d ORDER BY d DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![from_ms, limit], |r| {
+            let day: i64 = r.get(0)?;
+            Ok(DayRow {
+                day_ms: day * 86_400_000,
+                cached: r.get(1)?,
+                reply: r.get(2)?,
+                forwarded: r.get(3)?,
+                blocked: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     fn top(&self, sql: &str, from_ms: i64, limit: i64) -> Result<Vec<CountRow>> {

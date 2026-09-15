@@ -150,6 +150,7 @@ HOST=myhost ./build.sh --deploy
 | `--retention-days <N>` | `30` | `ingest` が定期削除する保持日数。 |
 | `--poll-ms <MS>` | `1000` | `ingest` のポーリング間隔。 |
 | `--top <N>` | `10` | TUI / 統計の上位件数。 |
+| `--tz-offset <OFFSET>` | `utc` | 表示のローカル時刻オフセット (`utc` / `+9` / `-5` / `+05:30`)。 |
 | `--older-than <DUR>` | `30d` | `prune` の対象 (例 `12h`, `90m`, `2w`)。 |
 | `--apply` | off | `prune` を実際に実行 (無指定は dry-run)。 |
 | `--vacuum` | off | `prune` 後に `VACUUM`。 |
@@ -202,7 +203,12 @@ dnsmasq-cli-rs prune --older-than 90d --apply --vacuum
   揃った時点で 1 行になります。
 - dnsmasq の再起動で `seq` は 1 に戻ります。PID の変化を検知して pending を確定します。
 - **専用ログにはタイムスタンプがありません。** 保存される `ts` は *取り込み時刻* であり、
-  クエリの発生日時ではありません。これは意図した仕様です。
+  クエリの発生日時ではありません。これは意図した仕様です。`ingest` が止まっている間に
+  ログへ溜まった行は、再開した瞬間の時刻でまとめて記録されるため、その区間の日別グラフには
+  実際には存在しないスパイクが現れます (`ts` は UTC のエポックミリ秒)。
+- **表示は既定で UTC です。** `--tz-offset +9` (または環境変数
+  `DNSMASQ_CLI_RS_TZ_OFFSET=+9`) を与えると、TUI / `info` の時刻と日別集計がローカル時刻に
+  なります。DB の `ts` は UTC のままなので、後から切り替えてもデータは変わりません。
 - イベントの挿入と tail オフセットの更新は **1 トランザクション**で行うため、クラッシュしても
   行の重複・欠落は起きません。
 - ローテーション (inode 変化) と truncate (サイズ縮小) を検知して追従します。
@@ -298,6 +304,9 @@ WantedBy=multi-user.target
 
 - ingest はログへの **読み取り** と DB ディレクトリへの **書き込み** が必要です。専用の
   非特権ユーザーで動かすのがおすすめです。
+- dnsmasq は専用ログを `dnsmasq:dnsmasq 0640` で作るため、取り込みユーザーを `dnsmasq`
+  グループに追加してください (`addgroup <user> dnsmasq`)。所属していないとログを読めず、
+  ingest が停止します。`deploy/setup.sh` はこの追加を行います。
 - TUI は DB を読むだけなので権限は不要です。`w` / `R` は OpenRC 環境で特定コマンドに対する
   パスワードレス sudo が必要です。
 
@@ -312,6 +321,12 @@ WantedBy=multi-user.target
   ingest が同じファイルにアクセスできる必要があります。
 - **行が表示されない** — ログに想定形式の `log-queries=extra` 出力が含まれているか、`ingest`
   が動いているかを確認してください。
+- **データが途中で止まっている** — `/var/log/dnsmasq.log` を読めるか確認してください。
+  dnsmasq は `dnsmasq:dnsmasq 0640` で作るため、取り込みユーザーが `dnsmasq` グループに
+  入っていないと読めません。`ingest` はログを開けない間 `ingest.log` に 1 回だけ警告を出し、
+  以降は `heartbeat: +0 rows` を出し続けます。復帰時は `log readable again` を出します。
+- **TUI / `info` の時刻が 9 時間ずれる** — 表示は既定で UTC です。`--tz-offset +9` または
+  環境変数 `DNSMASQ_CLI_RS_TZ_OFFSET=+9` を指定してください。
 
 ## 開発
 

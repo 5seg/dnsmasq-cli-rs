@@ -23,7 +23,10 @@ fn main() {
 }
 
 fn dispatch(args: &[String]) -> Result<()> {
-    match cli::parse(args)? {
+    let cmd = cli::parse(args)?;
+    // 表示・日別集計はこのオフセットでローカル時刻になる (DB の ts は UTC のまま)。
+    util::set_tz_offset_ms(cmd.tz_offset_ms());
+    match cmd {
         Cmd::Help => {
             print!("{}", cli::usage());
             Ok(())

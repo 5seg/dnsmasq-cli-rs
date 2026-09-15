@@ -214,12 +214,13 @@ impl App {
         let from = now_millis() - self.period.ms();
         self.summary = self.store.summary(from, self.cfg.top)?;
         // 直近 DAILY_DAYS 日を固定スロットで用意する (データの無い日はゼロ)。
-        let today = now_millis() / 86_400_000;
+        let off = crate::util::tz_offset_ms();
+        let today = (now_millis() + off) / 86_400_000;
         let start = today - (DAILY_DAYS - 1);
-        let rows = self.store.daily(start * 86_400_000, DAILY_DAYS)?;
+        let rows = self.store.daily(start, DAILY_DAYS)?;
         self.daily = (0..DAILY_DAYS)
             .map(|i| {
-                let ms = (start + i) * 86_400_000;
+                let ms = (start + i) * 86_400_000 - off;
                 rows.iter()
                     .find(|r| r.day_ms == ms)
                     .cloned()

@@ -155,11 +155,13 @@ No installation step is required; the binary is self-contained. Copy it to
 | `--retention-days <N>` | `30` | Rows older than this are deleted by `ingest`. |
 | `--poll-ms <MS>` | `1000` | `ingest` polling interval. |
 | `--top <N>` | `10` | Number of entries in TUI/stats rankings. |
+| `--tz-offset <OFFSET>` | `utc` | Local time offset for display (`utc` / `+9` / `-5` / `+05:30`). |
 | `--older-than <DUR>` | `30d` | `prune` cutoff (e.g. `12h`, `90m`, `2w`). |
 | `--apply` | off | Actually perform the `prune` (otherwise dry-run). |
 | `--vacuum` | off | Run `VACUUM` after `prune`. |
 
-`--log` and `--db` also accept the `--log=PATH` / `--db=PATH` form.
+`--log`, `--db`, and `--tz-offset` also accept the `--log=PATH` / `--db=PATH` /
+`--tz-offset=+9` form.
 
 Example — prune everything older than 90 days and reclaim space:
 
@@ -207,7 +209,13 @@ Details worth knowing:
   (same `seq`) arrives; the pair becomes one row.
 - `seq` resets to 1 when dnsmasq restarts, so a change of PID flushes pending queries.
 - **The dedicated dnsmasq log has no timestamps**, so the stored `ts` is the *ingest
-  time*, not the time the query was made. This is a deliberate trade-off.
+  time*, not the time the query was made. This is a deliberate trade-off. Lines that
+  accumulated while `ingest` was stopped are all stamped with the moment it resumed, so
+  the daily chart shows a spike where none really happened (`ts` is UTC epoch millis).
+- **Display defaults to UTC.** Pass `--tz-offset +9` (or set
+  `DNSMASQ_CLI_RS_TZ_OFFSET=+9`) to render TUI / `info` times and the daily
+  buckets in local time. The stored `ts` stays UTC, so this is safe to change at any
+  time.
 - Insertion of events and the update of the tail offset happen in **one transaction**;
   a crash can never duplicate or lose lines.
 - Log rotation (inode change) and truncation (size shrink) are detected and followed.
@@ -305,6 +313,9 @@ Permissions:
 
 - The ingester needs **read** access to the log and **write** access to the database
   directory. Running it as its own unprivileged user is recommended.
+- dnsmasq creates its dedicated log as `dnsmasq:dnsmasq 0640`, so add the ingest user
+  to the `dnsmasq` group (`addgroup <user> dnsmasq`). Without it the ingester cannot
+  read the log and silently stops. `deploy/setup.sh` performs this step.
 - The TUI only reads the database, so it needs no privileges. `w` / `R` require
   password-less sudo for the specific commands on OpenRC systems.
 
@@ -320,6 +331,13 @@ Permissions:
   `-shm` sidecars). The TUI and ingester must be able to access the same file.
 - **No rows appear** — confirm the log actually contains `log-queries=extra` output
   in the expected format, and that `ingest` is running.
+- **Data stops partway through** — check that `/var/log/dnsmasq.log` is readable.
+  dnsmasq creates it `dnsmasq:dnsmasq 0640`, so the ingest user must be in the
+  `dnsmasq` group. While it cannot open the log, `ingest` writes one warning to
+  `ingest.log` and then keeps reporting `heartbeat: +0 rows`; it logs
+  `log readable again` when access is restored.
+- **Times are off by hours** — display defaults to UTC. Use `--tz-offset +9` or set
+  `DNSMASQ_CLI_RS_TZ_OFFSET=+9`.
 
 ## Development
 

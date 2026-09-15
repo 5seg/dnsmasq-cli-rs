@@ -43,7 +43,7 @@ src/
   parser.rs     dnsmasq 行パーサ (純粋関数)
   store.rs      rusqlite: schema, バッチ挿入と tail 状態の原子的コミット, 集計
   ingest.rs     tail + follow + ローテーション追従 + pending 相関
-  util.rs       UTC 時刻整形 / 期間パース
+  util.rs       時刻整形 (TZ オフセット) / 期間・オフセットパース
   tui/
     mod.rs      App 状態 + イベントループ + キー処理
     ui.rs       ratatui 描画 (Live / Stats)
@@ -59,6 +59,15 @@ deploy/
   保存する offset は pending が指す最も古い行の先頭 (`ingest.rs` の `safe`) であること。
 - **seq は dnsmasq 再起動で 1 に戻る**: PID 変化を検知して pending をフラッシュする。
 - **ログにタイムスタンプが無い**: `ts` は取り込み時刻。`spec` 上の制約であり仕様。
+  したがって ingest が止まっていた区間の行は、再開時刻でまとめて記録され、日別グラフに
+  偽のスパイクが出る。これは直せない (発生源に時刻が無い) ので、止めないことが重要。
+- **ログの読み取り権限**: dnsmasq は `/var/log/dnsmasq.log` を `dnsmasq:dnsmasq 0640` で
+  作る。取り込みユーザーが `dnsmasq` グループに入っていないと読めず ingest が停止する。
+  `setup.sh` のグループ追加を消さないこと。`ingest.rs` は開けない間 1 回だけ警告を出す。
+- **表示は UTC 既定**: `util.rs` の `TZ_OFFSET_MS` (既定 0) を `--tz-offset` /
+  `DNSMASQ_CLI_RS_TZ_OFFSET` で設定し、`breakdown` と `store::daily` に適用する。
+  DB の `ts` は UTC のまま。日別集計の `day_ms` は「ローカル日の先頭に対応する UTC millis」
+  (`day * 86_400_000 - offset`) で、`fmt_date` が再びオフセットを足す前提。
 - **ブロック判定**: `config`/`reply` の応答が `0.0.0.0` / `::` なら `blocked`。
 - **バージョン**: ratatui 0.30 は `crossterm` 0.29 を内部利用。二重依存を避けるため
   直接依存も 0.29 に合わせる。

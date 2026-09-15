@@ -39,7 +39,8 @@ pub struct CountRow {
     pub blocked: i64,
 }
 
-/// 日別の集計行 (day_ms は UTC 日の先頭)。
+/// 日別の集計行 (day_ms はローカル日の先頭を表す UTC millis)。
+/// `util::fmt_date(day_ms)` がその日のローカル日付を返す。
 #[derive(Clone, Debug)]
 pub struct DayRow {
     pub day_ms: i64,
@@ -324,21 +325,26 @@ impl Store {
         })
     }
 
-    /// `ts >= from_ms` の行を UTC 日ごとに集計する (新しい日が先頭)。
-    pub fn daily(&self, from_ms: i64, limit: i64) -> Result<Vec<DayRow>> {
+    /// ローカル日番号 `from_day` 以降の行をローカル日ごとに集計する (新しい日が先頭)。
+    /// 日番号は `(ts + tz_offset) / 86_400_000` で、`ts` 側に同じオフセットを足して
+    /// 境界を揃える。返す `day_ms` はローカル日の先頭に対応する UTC millis
+    /// (`day * 86_400_000 - tz_offset`) なので、表示時に再びオフセットを足すと
+    /// ちょうどその日のローカル 0 時になる。
+    pub fn daily(&self, from_day: i64, limit: i64) -> Result<Vec<DayRow>> {
+        let off = crate::util::tz_offset_ms();
         let mut stmt = self.conn.prepare(
-            "SELECT (ts / 86400000) d,
+            "SELECT (ts + ?2) / 86400000 d,
                     SUM(outcome = 'cached'),
                     SUM(outcome = 'reply'),
                     SUM(outcome = 'forwarded'),
                     SUM(outcome = 'blocked')
-             FROM queries WHERE ts >= ?1
-             GROUP BY d ORDER BY d DESC LIMIT ?2",
+             FROM queries WHERE ts + ?2 >= ?1 * 86400000
+             GROUP BY d ORDER BY d DESC LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![from_ms, limit], |r| {
+        let rows = stmt.query_map(params![from_day, off, limit], |r| {
             let day: i64 = r.get(0)?;
             Ok(DayRow {
-                day_ms: day * 86_400_000,
+                day_ms: day * 86_400_000 - off,
                 cached: r.get(1)?,
                 reply: r.get(2)?,
                 forwarded: r.get(3)?,

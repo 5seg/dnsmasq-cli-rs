@@ -55,6 +55,7 @@ pub fn run(cfg: &Config) -> Result<()> {
     let mut last_beat = Instant::now();
     let mut committed_since = 0usize;
     let mut last_committed_offset = u64::MAX; // 起動直後は必ず 1 回書く
+    let mut open_failed = false;
 
     log(&format!(
         "ingest start: log={} db={} retention={}d",
@@ -62,7 +63,24 @@ pub fn run(cfg: &Config) -> Result<()> {
     ));
 
     loop {
-        if let Ok(mut f) = File::open(&cfg.log) {
+        // ログが開けない間は取り込みが完全に止まる。無言でスキップすると
+        // 「サービスは動いているのにデータが増えない」状態に気づけないため、
+        // 失敗と復帰を 1 回ずつログに出す。
+        let opened = File::open(&cfg.log);
+        if let Err(e) = &opened {
+            if !open_failed {
+                log(&format!(
+                    "cannot open log {}: {e} — ingest stalled (read permission?); \
+                     heartbeats will keep reporting +0 rows",
+                    cfg.log
+                ));
+                open_failed = true;
+            }
+        } else if open_failed {
+            log(&format!("log readable again: {} — resuming at offset {base}", cfg.log));
+            open_failed = false;
+        }
+        if let Ok(mut f) = opened {
             let mut saw = false;
             if let Ok(md) = f.metadata() {
                 let read_pos = base + buf.len() as u64;

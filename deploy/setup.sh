@@ -40,6 +40,19 @@ log-facility=/var/log/dnsmasq.log
 CONF
 chmod 0644 /etc/dnsmasq.d/logging.conf
 
+# ---- 1b. ログの読み取り権限 ------------------------------------------------
+# dnsmasq は専用ログを dnsmasq:dnsmasq 0640 で作るため、非特権で動く取り込み
+# サービスはそのままだと読めず、ingest が無言で停止する。サービスからは sudo
+# できないので、取り込みユーザーをここで dnsmasq グループに恒久的に追加する。
+if getent group dnsmasq >/dev/null 2>&1; then
+    if getent group dnsmasq | cut -d: -f4 | tr ',' '\n' | grep -qx "$SVC_USER"; then
+        say "$SVC_USER は既に dnsmasq グループに所属しています"
+    else
+        say "$SVC_USER を dnsmasq グループに追加します"
+        addgroup "$SVC_USER" dnsmasq
+    fi
+fi
+
 # ---- 2. logrotate ----------------------------------------------------------
 say "logrotate 設定を書き込みます"
 cat > /etc/logrotate.d/dnsmasq <<CONF
@@ -143,7 +156,15 @@ say "dnsmasq を検証して再起動します"
 /usr/sbin/dnsmasq --test --conf-file=/etc/dnsmasq.conf
 rc-service dnsmasq restart
 sleep 1
-[ -f "$DSQ_LOG" ] && chmod 0644 "$DSQ_LOG" || true
+# ログが dnsmasq グループから読めることを保証する (0644 は使わない)。
+if [ -f "$DSQ_LOG" ]; then
+    if getent group dnsmasq >/dev/null 2>&1; then
+        chgrp dnsmasq "$DSQ_LOG" 2>/dev/null || true
+        chmod 0640 "$DSQ_LOG" 2>/dev/null || true
+    else
+        chmod 0644 "$DSQ_LOG" 2>/dev/null || true
+    fi
+fi
 
 # ---- 7. 取り込みサービスを起動 --------------------------------------------
 say "取り込みサービスを起動します"

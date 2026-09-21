@@ -207,15 +207,16 @@ impl App {
     }
 
     pub fn bootstrap(&mut self) -> Result<()> {
-        // 起動時に直近 MAX_BUFFER 行をメモリへ載せる。以降 poll_rows() が新規行を追記する
-        // (新規行だけでは過去分は埋まらないため、ここで履歴を確保する)。
-        let rows = self.store.rows_recent(MAX_BUFFER as i64)?;
+        // 起動時に直近 MAX_BUFFER 行をメモリへ載せる。以降 poll_rows() が新規行を先頭へ挿入する
+        // (最新が一番上に来るように格納)。
+        let mut rows = self.store.rows_recent(MAX_BUFFER as i64)?;
         self.last_id = rows.last().map(|r| r.id).unwrap_or(0);
+        rows.reverse();
         self.events.extend(rows);
         // 起動時にバックグラウンドで集計を先行開始 (プリフェッチ)
         self.trigger_refresh_summary();
         self.trigger_refresh_daily();
-        self.jump_to_end();
+        self.jump_to_top();
         Ok(())
     }
 
@@ -231,13 +232,13 @@ impl App {
             self.last_id = last.id;
         }
         for r in rows {
-            self.events.push_back(r);
+            self.events.push_front(r);
         }
         while self.events.len() > MAX_BUFFER {
-            self.events.pop_front();
+            self.events.pop_back();
         }
         if self.follow {
-            self.jump_to_end();
+            self.jump_to_top();
         }
         Ok(())
     }
@@ -359,8 +360,16 @@ impl App {
             .collect()
     }
 
-    fn jump_to_end(&mut self) {
+    fn jump_to_top(&mut self) {
+        self.cursor = 0;
+        self.scroll = 0;
         self.follow = true;
+    }
+
+    fn jump_to_end(&mut self) {
+        let len = self.filtered_len();
+        self.cursor = len.saturating_sub(1);
+        self.follow = false;
     }
 
     /// フィルタ後の件数を返す (描画補助)。
@@ -434,7 +443,7 @@ impl App {
                     };
                     self.status = format!("filter: {target:?}");
                     self.input = None;
-                    self.jump_to_end();
+                    self.jump_to_top();
                 }
                 KeyCode::Backspace => {
                     match mode {
@@ -462,6 +471,7 @@ impl App {
                 self.search.clear();
                 self.client_filter.clear();
                 self.block_filter = BlockFilter::Default;
+                self.jump_to_top();
             }
             KeyCode::Tab => {
                 self.tab = self.tab.next();
@@ -501,7 +511,7 @@ impl App {
             KeyCode::Char('b') => {
                 self.block_filter = self.block_filter.next();
                 self.status = self.block_filter.label().to_string();
-                self.jump_to_end();
+                self.jump_to_top();
             }
             KeyCode::Char('p') => {
                 self.paused = !self.paused;
@@ -522,29 +532,30 @@ impl App {
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.follow = false;
                 self.cursor = self.cursor.saturating_sub(1);
+                if self.cursor == 0 {
+                    self.follow = true;
+                }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.follow = false;
                 self.cursor = self.cursor.saturating_add(1);
             }
             KeyCode::PageUp => {
-                self.follow = false;
                 self.cursor = self.cursor.saturating_sub(self.view_height.max(1));
+                if self.cursor == 0 {
+                    self.follow = true;
+                }
             }
             KeyCode::PageDown => {
                 self.follow = false;
                 self.cursor = self.cursor.saturating_add(self.view_height.max(1));
             }
             KeyCode::Home | KeyCode::Char('g') => {
-                self.follow = false;
-                self.cursor = 0;
+                self.jump_to_top();
             }
             KeyCode::End | KeyCode::Char('G') => {
-                let len = self.filtered_len();
-                self.cursor = len.saturating_sub(1);
-                self.follow = true;
+                self.jump_to_end();
             }
             KeyCode::Char('w') => {
                 if let Some(row) = self.selected() {

@@ -97,6 +97,7 @@ pub fn parse_line(raw: &str, ts: i64) -> Parsed {
             }
         }
         "cached" => Outcome::Cached,
+        "cached-stale" => Outcome::CachedStale,
         "config" => {
             let a = answer(3).unwrap_or_default();
             if is_null_addr(&a) {

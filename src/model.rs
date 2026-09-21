@@ -9,6 +9,8 @@ pub enum Outcome {
     Forwarded,
     /// dnsmasq のキャッシュから返された。
     Cached,
+    /// dnsmasq の期限切れキャッシュ (serve-stale / use-stale-cache) から返された。
+    CachedStale,
     /// 上流からの応答 (reply)。
     Reply,
     /// /etc/hosts から返された。
@@ -25,6 +27,7 @@ impl Outcome {
             Outcome::Blocked => "blocked",
             Outcome::Forwarded => "forwarded",
             Outcome::Cached => "cached",
+            Outcome::CachedStale => "cached-stale",
             Outcome::Reply => "reply",
             Outcome::Hosts => "hosts",
             Outcome::Unknown => "unknown",

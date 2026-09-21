@@ -80,10 +80,11 @@ fn outcome_style(o: &Outcome) -> Style {
         Outcome::Blocked => Color::Red,
         Outcome::Forwarded => Color::Green,
         Outcome::Cached => Color::Yellow,
+        Outcome::CachedStale => Color::Cyan,
         Outcome::Reply => Color::Blue,
         Outcome::Hosts => Color::Magenta,
         Outcome::Unknown => Color::DarkGray,
-        Outcome::Other(_) => Color::Cyan,
+        Outcome::Other(_) => Color::White,
     };
     Style::default().fg(color)
 }
@@ -131,7 +132,7 @@ fn render_live(f: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(16),
             Constraint::Min(24),
             Constraint::Length(6),
-            Constraint::Length(9),
+            Constraint::Length(12),
             Constraint::Min(12),
         ],
     )
@@ -566,10 +567,11 @@ fn outcome_color(name: &str) -> Color {
         "blocked" => Color::Red,
         "forwarded" => Color::Green,
         "cached" => Color::Yellow,
+        "cached-stale" => Color::Cyan,
         "reply" => Color::Blue,
         "hosts" => Color::Magenta,
         "unknown" => Color::DarkGray,
-        _ => Color::Cyan,
+        _ => Color::White,
     }
 }
 

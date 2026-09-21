@@ -337,7 +337,7 @@ impl Store {
         let off = crate::util::tz_offset_ms();
         let mut stmt = self.conn.prepare(
             "SELECT (ts + ?2) / 86400000 d,
-                    SUM(outcome = 'cached'),
+                    SUM(outcome = 'cached' OR outcome = 'cached-stale'),
                     SUM(outcome = 'reply'),
                     SUM(outcome = 'forwarded'),
                     SUM(outcome = 'blocked')
@@ -393,6 +393,7 @@ impl Outcome {
             "blocked" => Outcome::Blocked,
             "forwarded" => Outcome::Forwarded,
             "cached" => Outcome::Cached,
+            "cached-stale" => Outcome::CachedStale,
             "reply" => Outcome::Reply,
             "hosts" => Outcome::Hosts,
             "unknown" => Outcome::Unknown,

@@ -163,7 +163,8 @@ fn render_live(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     let s = &app.summary;
-    if s.total == 0 && app.summary_loading {
+    // 現在の期間に対応する集計がまだ無い間は数値を出さない (別期間の値を誤表示しない)。
+    if app.summary_period != Some(app.period) {
         let msg = Paragraph::new("(calculating statistics in background...)")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(ratatui::layout::Alignment::Center)

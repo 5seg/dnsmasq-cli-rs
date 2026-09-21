@@ -138,6 +138,8 @@ pub struct App {
     pub tab: Tab,
     pub period: Period,
     pub summary: Summary,
+    /// `summary` が対応する期間。現在の `period` と一致しない間は未確定。
+    pub summary_period: Option<Period>,
     pub daily: Vec<DayRow>,
 
     pub summary_loading: bool,
@@ -177,6 +179,7 @@ impl App {
             tab: Tab::Live,
             period: Period::H24,
             summary: Summary::default(),
+            summary_period: None,
             daily: Vec::new(),
             summary_loading: false,
             daily_loading: false,
@@ -198,9 +201,9 @@ impl App {
     }
 
     pub fn bootstrap(&mut self) -> Result<()> {
-        // 起動高速化: 初期ロードは直近 2,000 行に抑える。
-        // メモリバッファ (MAX_BUFFER) は poll_rows() で徐々に埋まる。
-        let rows = self.store.rows_recent(2_000)?;
+        // 起動時に直近 MAX_BUFFER 行をメモリへ載せる。以降 poll_rows() が新規行を追記する
+        // (新規行だけでは過去分は埋まらないため、ここで履歴を確保する)。
+        let rows = self.store.rows_recent(MAX_BUFFER as i64)?;
         self.last_id = rows.last().map(|r| r.id).unwrap_or(0);
         self.events.extend(rows);
         // 起動時にバックグラウンドで集計を先行開始 (プリフェッチ)
@@ -273,11 +276,14 @@ impl App {
             match msg {
                 BgResult::Summary { period, result } => {
                     self.summary_loading = false;
-                    if period == self.period {
-                        match result {
-                            Ok(s) => self.summary = s,
-                            Err(e) => self.status = format!("summary error: {e}"),
+                    match result {
+                        Ok(s) if period == self.period => {
+                            self.summary = s;
+                            self.summary_period = Some(period);
                         }
+                        // 取得中に期間が変わった。現在の期間で取り直す。
+                        Ok(_) => self.trigger_refresh_summary(),
+                        Err(e) => self.status = format!("summary error: {e}"),
                     }
                 }
                 BgResult::Daily(result) => {
@@ -310,11 +316,18 @@ impl App {
             }
         }
         if self.last_stats.elapsed() >= STATS_INTERVAL {
-            self.last_stats = Instant::now();
+            // 表示中のタブだけを再集計する。Live では間隔を進めないので、
+            // タブを戻した時に即座に更新される。
             match self.tab {
                 Tab::Live => {}
-                Tab::Stats => self.trigger_refresh_summary(),
-                Tab::Daily => self.trigger_refresh_daily(),
+                Tab::Stats => {
+                    self.last_stats = Instant::now();
+                    self.trigger_refresh_summary();
+                }
+                Tab::Daily => {
+                    self.last_stats = Instant::now();
+                    self.trigger_refresh_daily();
+                }
             }
         }
     }
@@ -442,11 +455,11 @@ impl App {
             }
             KeyCode::Tab => {
                 self.tab = self.tab.next();
-                // ターゲットタブのデータがまだ一度も取得されていなければ即座に非同期取得
+                // 表示対象のデータが未取得、または現在の期間と不一致なら即座に非同期取得
                 match self.tab {
                     Tab::Live => {}
                     Tab::Stats => {
-                        if self.summary.total == 0 {
+                        if self.summary_period != Some(self.period) {
                             self.trigger_refresh_summary();
                         }
                     }
@@ -459,15 +472,21 @@ impl App {
             }
             KeyCode::Char('1') => {
                 self.period = Period::H1;
-                self.trigger_refresh_summary();
+                if self.tab == Tab::Stats {
+                    self.trigger_refresh_summary();
+                }
             }
             KeyCode::Char('2') => {
                 self.period = Period::H24;
-                self.trigger_refresh_summary();
+                if self.tab == Tab::Stats {
+                    self.trigger_refresh_summary();
+                }
             }
             KeyCode::Char('3') => {
                 self.period = Period::D7;
-                self.trigger_refresh_summary();
+                if self.tab == Tab::Stats {
+                    self.trigger_refresh_summary();
+                }
             }
             KeyCode::Char('b') => {
                 self.block_filter = self.block_filter.next();
@@ -488,7 +507,9 @@ impl App {
             }
             KeyCode::Char('T') => {
                 self.period = self.period.cycle();
-                self.trigger_refresh_summary();
+                if self.tab == Tab::Stats {
+                    self.trigger_refresh_summary();
+                }
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.follow = false;

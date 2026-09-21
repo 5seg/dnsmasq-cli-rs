@@ -285,34 +285,34 @@ impl Store {
         )?;
 
         let domains = self.top(
-            "SELECT domain, COUNT(*) c, SUM(outcome = 'blocked') b
+            "SELECT domain, COUNT(*) c, 0 b
              FROM queries WHERE ts >= ?1 AND outcome != 'blocked'
-             GROUP BY domain ORDER BY c DESC LIMIT ?2",
+             GROUP BY +domain ORDER BY c DESC LIMIT ?2",
             from_ms,
             top,
         )?;
         let blocked_domains = self.top(
-            "SELECT domain, COUNT(*) c, SUM(outcome = 'blocked') b
+            "SELECT domain, COUNT(*) c, COUNT(*) b
              FROM queries WHERE ts >= ?1 AND outcome = 'blocked'
-             GROUP BY domain ORDER BY c DESC LIMIT ?2",
+             GROUP BY +domain ORDER BY c DESC LIMIT ?2",
             from_ms,
             top,
         )?;
         let clients = self.top(
             "SELECT client, COUNT(*) c, SUM(outcome = 'blocked') b
-             FROM queries WHERE ts >= ?1 GROUP BY client ORDER BY c DESC LIMIT ?2",
+             FROM queries WHERE ts >= ?1 GROUP BY +client ORDER BY c DESC LIMIT ?2",
             from_ms,
             top,
         )?;
         let qtypes = self.top(
             "SELECT COALESCE(qtype, '?'), COUNT(*) c, SUM(outcome = 'blocked') b
-             FROM queries WHERE ts >= ?1 GROUP BY 1 ORDER BY c DESC LIMIT ?2",
+             FROM queries WHERE ts >= ?1 GROUP BY +qtype ORDER BY c DESC LIMIT ?2",
             from_ms,
             top,
         )?;
         let outcomes = self.top(
             "SELECT outcome, COUNT(*) c, SUM(outcome = 'blocked') b
-             FROM queries WHERE ts >= ?1 GROUP BY outcome ORDER BY c DESC LIMIT ?2",
+             FROM queries WHERE ts >= ?1 GROUP BY +outcome ORDER BY c DESC LIMIT ?2",
             from_ms,
             -1,
         )?;

@@ -18,7 +18,7 @@ const MAX_BUFFER: usize = 20_000;
 /// 新規行を取り込む間隔。
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// 統計を再集計する間隔。
-const STATS_INTERVAL: Duration = Duration::from_secs(3);
+const STATS_INTERVAL: Duration = Duration::from_secs(10);
 /// Daily タブで表示する日数。
 const DAILY_DAYS: i64 = 7;
 
@@ -239,10 +239,7 @@ impl App {
         match self.tab {
             Tab::Live => {}
             Tab::Stats => self.refresh_summary()?,
-            Tab::Daily => {
-                self.refresh_summary()?;
-                self.refresh_daily()?;
-            }
+            Tab::Daily => self.refresh_daily()?,
         }
         self.last_stats = Instant::now();
         Ok(())
@@ -384,20 +381,33 @@ impl App {
             }
             KeyCode::Tab => {
                 self.tab = self.tab.next();
-                // タブ切替時に古いデータを使わないよう即座に再計算を促す
-                self.last_stats = Instant::now() - STATS_INTERVAL;
+                // ターゲットタブのデータがまだ一度も取得されていなければ即座に取得
+                let need_refresh = match self.tab {
+                    Tab::Live => false,
+                    Tab::Stats => self.summary.total == 0,
+                    Tab::Daily => self.daily.is_empty(),
+                };
+                if need_refresh {
+                    self.last_stats = Instant::now() - STATS_INTERVAL;
+                }
             }
             KeyCode::Char('1') => {
                 self.period = Period::H1;
-                let _ = self.refresh_stats();
+                if self.tab == Tab::Stats {
+                    let _ = self.refresh_summary();
+                }
             }
             KeyCode::Char('2') => {
                 self.period = Period::H24;
-                let _ = self.refresh_stats();
+                if self.tab == Tab::Stats {
+                    let _ = self.refresh_summary();
+                }
             }
             KeyCode::Char('3') => {
                 self.period = Period::D7;
-                let _ = self.refresh_stats();
+                if self.tab == Tab::Stats {
+                    let _ = self.refresh_summary();
+                }
             }
             KeyCode::Char('b') => {
                 self.block_filter = self.block_filter.next();
@@ -418,7 +428,9 @@ impl App {
             }
             KeyCode::Char('T') => {
                 self.period = self.period.cycle();
-                let _ = self.refresh_stats();
+                if self.tab == Tab::Stats {
+                    let _ = self.refresh_summary();
+                }
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.follow = false;

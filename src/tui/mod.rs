@@ -4,6 +4,7 @@ mod manage;
 mod ui;
 
 use std::collections::VecDeque;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -12,6 +13,14 @@ use ratatui::DefaultTerminal;
 
 use crate::cli::Config;
 use crate::store::{now_millis, DbRow, DayRow, Store, Summary};
+
+enum BgResult {
+    Summary {
+        period: Period,
+        result: Result<Summary>,
+    },
+    Daily(Result<Vec<DayRow>>),
+}
 
 /// メモリ上に保持する最大行数。
 const MAX_BUFFER: usize = 20_000;
@@ -131,6 +140,11 @@ pub struct App {
     pub summary: Summary,
     pub daily: Vec<DayRow>,
 
+    pub summary_loading: bool,
+    pub daily_loading: bool,
+    bg_tx: Sender<BgResult>,
+    bg_rx: Receiver<BgResult>,
+
     pub search: String,
     pub client_filter: String,
     pub block_filter: BlockFilter,
@@ -152,17 +166,22 @@ pub struct App {
 
 impl App {
     pub fn new(store: Store, cfg: Config) -> Self {
+        let (bg_tx, bg_rx) = channel();
         App {
             store,
             cfg,
             events: VecDeque::new(),
             last_id: 0,
             last_poll: Instant::now(),
-            last_stats: Instant::now() - STATS_INTERVAL,
+            last_stats: Instant::now(),
             tab: Tab::Live,
             period: Period::H24,
             summary: Summary::default(),
             daily: Vec::new(),
+            summary_loading: false,
+            daily_loading: false,
+            bg_tx,
+            bg_rx,
             search: String::new(),
             client_filter: String::new(),
             block_filter: BlockFilter::Default,
@@ -184,7 +203,9 @@ impl App {
         let rows = self.store.rows_recent(2_000)?;
         self.last_id = rows.last().map(|r| r.id).unwrap_or(0);
         self.events.extend(rows);
-        self.refresh_stats()?;
+        // 起動時にバックグラウンドで集計を先行開始 (プリフェッチ)
+        self.trigger_refresh_summary();
+        self.trigger_refresh_daily();
         self.jump_to_end();
         Ok(())
     }
@@ -212,40 +233,76 @@ impl App {
         Ok(())
     }
 
-    fn refresh_summary(&mut self) -> Result<()> {
-        let from = now_millis() - self.period.ms();
-        self.summary = self.store.summary(from, self.cfg.top)?;
-        Ok(())
+    pub fn trigger_refresh_summary(&mut self) {
+        if self.summary_loading {
+            return;
+        }
+        self.summary_loading = true;
+        let tx = self.bg_tx.clone();
+        let db_path = self.cfg.db.clone();
+        let period = self.period;
+        let from = now_millis() - period.ms();
+        let top = self.cfg.top;
+        std::thread::spawn(move || {
+            let res = Store::open_ro(&db_path).and_then(|s| s.summary(from, top));
+            let _ = tx.send(BgResult::Summary {
+                period,
+                result: res,
+            });
+        });
     }
 
-    fn refresh_daily(&mut self) -> Result<()> {
+    pub fn trigger_refresh_daily(&mut self) {
+        if self.daily_loading {
+            return;
+        }
+        self.daily_loading = true;
+        let tx = self.bg_tx.clone();
+        let db_path = self.cfg.db.clone();
         let off = crate::util::tz_offset_ms();
         let today = (now_millis() + off) / 86_400_000;
         let start = today - (DAILY_DAYS - 1);
-        let rows = self.store.daily(start, DAILY_DAYS)?;
-        self.daily = (0..DAILY_DAYS)
-            .map(|i| {
-                let ms = (start + i) * 86_400_000 - off;
-                rows.iter()
-                    .find(|r| r.day_ms == ms)
-                    .cloned()
-                    .unwrap_or_else(|| DayRow::zeros(ms))
-            })
-            .collect();
-        Ok(())
-    }
-
-    fn refresh_stats(&mut self) -> Result<()> {
-        match self.tab {
-            Tab::Live => {}
-            Tab::Stats => self.refresh_summary()?,
-            Tab::Daily => self.refresh_daily()?,
-        }
-        self.last_stats = Instant::now();
-        Ok(())
+        std::thread::spawn(move || {
+            let res = Store::open_ro(&db_path).and_then(|s| s.daily(start, DAILY_DAYS));
+            let _ = tx.send(BgResult::Daily(res));
+        });
     }
 
     pub fn tick(&mut self) {
+        while let Ok(msg) = self.bg_rx.try_recv() {
+            match msg {
+                BgResult::Summary { period, result } => {
+                    self.summary_loading = false;
+                    if period == self.period {
+                        match result {
+                            Ok(s) => self.summary = s,
+                            Err(e) => self.status = format!("summary error: {e}"),
+                        }
+                    }
+                }
+                BgResult::Daily(result) => {
+                    self.daily_loading = false;
+                    match result {
+                        Ok(rows) => {
+                            let off = crate::util::tz_offset_ms();
+                            let today = (now_millis() + off) / 86_400_000;
+                            let start = today - (DAILY_DAYS - 1);
+                            self.daily = (0..DAILY_DAYS)
+                                .map(|i| {
+                                    let ms = (start + i) * 86_400_000 - off;
+                                    rows.iter()
+                                        .find(|r| r.day_ms == ms)
+                                        .cloned()
+                                        .unwrap_or_else(|| DayRow::zeros(ms))
+                                })
+                                .collect();
+                        }
+                        Err(e) => self.status = format!("daily error: {e}"),
+                    }
+                }
+            }
+        }
+
         if self.last_poll.elapsed() >= POLL_INTERVAL {
             self.last_poll = Instant::now();
             if let Err(e) = self.poll_rows() {
@@ -253,8 +310,11 @@ impl App {
             }
         }
         if self.last_stats.elapsed() >= STATS_INTERVAL {
-            if let Err(e) = self.refresh_stats() {
-                self.status = format!("stats error: {e}");
+            self.last_stats = Instant::now();
+            match self.tab {
+                Tab::Live => {}
+                Tab::Stats => self.trigger_refresh_summary(),
+                Tab::Daily => self.trigger_refresh_daily(),
             }
         }
     }
@@ -327,8 +387,9 @@ impl App {
                     let act = self.confirm.take().unwrap();
                     let msg = manage::execute(&act);
                     self.status = msg;
-                    // 管理操作後は統計を取り直す
-                    let _ = self.refresh_stats();
+                    // 管理操作後はバックグラウンドで統計を取り直す
+                    self.trigger_refresh_summary();
+                    self.trigger_refresh_daily();
                 }
                 _ => {
                     self.confirm = None;
@@ -381,33 +442,32 @@ impl App {
             }
             KeyCode::Tab => {
                 self.tab = self.tab.next();
-                // ターゲットタブのデータがまだ一度も取得されていなければ即座に取得
-                let need_refresh = match self.tab {
-                    Tab::Live => false,
-                    Tab::Stats => self.summary.total == 0,
-                    Tab::Daily => self.daily.is_empty(),
-                };
-                if need_refresh {
-                    self.last_stats = Instant::now() - STATS_INTERVAL;
+                // ターゲットタブのデータがまだ一度も取得されていなければ即座に非同期取得
+                match self.tab {
+                    Tab::Live => {}
+                    Tab::Stats => {
+                        if self.summary.total == 0 {
+                            self.trigger_refresh_summary();
+                        }
+                    }
+                    Tab::Daily => {
+                        if self.daily.is_empty() {
+                            self.trigger_refresh_daily();
+                        }
+                    }
                 }
             }
             KeyCode::Char('1') => {
                 self.period = Period::H1;
-                if self.tab == Tab::Stats {
-                    let _ = self.refresh_summary();
-                }
+                self.trigger_refresh_summary();
             }
             KeyCode::Char('2') => {
                 self.period = Period::H24;
-                if self.tab == Tab::Stats {
-                    let _ = self.refresh_summary();
-                }
+                self.trigger_refresh_summary();
             }
             KeyCode::Char('3') => {
                 self.period = Period::D7;
-                if self.tab == Tab::Stats {
-                    let _ = self.refresh_summary();
-                }
+                self.trigger_refresh_summary();
             }
             KeyCode::Char('b') => {
                 self.block_filter = self.block_filter.next();
@@ -428,9 +488,7 @@ impl App {
             }
             KeyCode::Char('T') => {
                 self.period = self.period.cycle();
-                if self.tab == Tab::Stats {
-                    let _ = self.refresh_summary();
-                }
+                self.trigger_refresh_summary();
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.follow = false;

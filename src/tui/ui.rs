@@ -26,8 +26,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // タブ
     let titles = vec![
         format!(" Live ({}) ", app.filtered_len()),
-        format!(" Stats [{}] ", app.period.label()),
-        " Daily ".to_string(),
+        if app.summary_loading {
+            format!(" Stats [{}] (loading...) ", app.period.label())
+        } else {
+            format!(" Stats [{}] ", app.period.label())
+        },
+        if app.daily_loading {
+            " Daily (loading...) ".to_string()
+        } else {
+            " Daily ".to_string()
+        },
     ];
     let sel = match app.tab {
         Tab::Live => 0,
@@ -155,6 +163,20 @@ fn render_live(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     let s = &app.summary;
+    if s.total == 0 && app.summary_loading {
+        let msg = Paragraph::new("(calculating statistics in background...)")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(ratatui::layout::Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(format!(" Stats [{}] ", app.period.label())),
+            );
+        f.render_widget(msg, area);
+        return;
+    }
+
     let rate = if s.total > 0 {
         s.blocked as f64 / s.total as f64
     } else {
@@ -175,12 +197,17 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
         rate * 100.0,
         app.period.label()
     );
+    let title = if app.summary_loading {
+        format!(" summary ({} window) [updating...] ", app.period.label())
+    } else {
+        format!(" summary ({} window) ", app.period.label())
+    };
     let gauge = Gauge::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .title(format!(" summary ({} window) ", app.period.label())),
+                .title(title),
         )
         .gauge_style(Style::default().fg(Color::Red))
         .ratio(rate.clamp(0.0, 1.0))
@@ -277,6 +304,20 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
 /// 日別統計: 上にクエリ数 (cached/reply/forwarded)、下にブロック数を
 /// 1 日 1 本の積み上げ棒で表示する。
 fn render_daily(f: &mut Frame, app: &App, area: Rect) {
+    if app.daily.is_empty() && app.daily_loading {
+        let msg = Paragraph::new("(calculating daily statistics in background...)")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(ratatui::layout::Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" Daily "),
+            );
+        f.render_widget(msg, area);
+        return;
+    }
+
     let rows = Layout::vertical([
         Constraint::Percentage(55),
         Constraint::Percentage(45),
@@ -297,7 +338,7 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     // クエリ数のパネル (棒グラフ | 数値リスト)
-    let q_title = Line::from(vec![
+    let mut title_spans = vec![
         Span::raw(" Query counts by day  "),
         Span::styled("■ cached", Style::default().fg(color_q("cached"))),
         Span::raw(" "),
@@ -305,7 +346,14 @@ fn render_daily(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(" "),
         Span::styled("■ forwarded", Style::default().fg(color_q("forwarded"))),
         Span::raw(" "),
-    ]);
+    ];
+    if app.daily_loading {
+        title_spans.push(Span::styled(
+            "[updating...] ",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    let q_title = Line::from(title_spans);
     let q_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)

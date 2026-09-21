@@ -83,16 +83,22 @@ impl Store {
 
     /// 読み取り専用で開く (TUI 用)。失敗したら書き込み可 + query_only で再試行。
     pub fn open_ro(path: &str) -> Result<Self> {
+        let setup = |conn: &Connection| -> Result<()> {
+            conn.busy_timeout(std::time::Duration::from_secs(5))?;
+            conn.pragma_update(None, "query_only", true)?;
+            // 292 MB 級 DB の読み取りを高速化する。
+            conn.pragma_update(None, "cache_size", -65536_i64)?; // 64 MB
+            conn.pragma_update(None, "mmap_size", 268_435_456_i64)?; // 256 MB
+            Ok(())
+        };
         match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
             Ok(conn) => {
-                conn.busy_timeout(std::time::Duration::from_secs(5))?;
-                conn.pragma_update(None, "query_only", true)?;
+                setup(&conn)?;
                 Ok(Store { conn })
             }
             Err(_) => {
                 let conn = Connection::open(path)?;
-                conn.busy_timeout(std::time::Duration::from_secs(5))?;
-                conn.pragma_update(None, "query_only", true)?;
+                setup(&conn)?;
                 Ok(Store { conn })
             }
         }
@@ -117,6 +123,7 @@ impl Store {
             CREATE INDEX IF NOT EXISTS idx_queries_domain  ON queries(domain);
             CREATE INDEX IF NOT EXISTS idx_queries_client  ON queries(client);
             CREATE INDEX IF NOT EXISTS idx_queries_outcome ON queries(outcome);
+            CREATE INDEX IF NOT EXISTS idx_queries_ts_outcome ON queries(ts, outcome);
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
             "#,
         )?;
@@ -270,15 +277,11 @@ impl Store {
 
     /// 期間内 (ts >= from) の集計をまとめて返す。
     pub fn summary(&self, from_ms: i64, top: i64) -> Result<Summary> {
-        let total: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM queries WHERE ts >= ?1",
+        // total と blocked を 1 クエリにまとめ、範囲スキャンを 1 回で済ませる。
+        let (total, blocked): (i64, i64) = self.conn.query_row(
+            "SELECT COUNT(*), SUM(outcome = 'blocked') FROM queries WHERE ts >= ?1",
             params![from_ms],
-            |r| r.get(0),
-        )?;
-        let blocked: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM queries WHERE ts >= ?1 AND outcome = 'blocked'",
-            params![from_ms],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
         )?;
 
         let domains = self.top(
@@ -338,7 +341,7 @@ impl Store {
                     SUM(outcome = 'reply'),
                     SUM(outcome = 'forwarded'),
                     SUM(outcome = 'blocked')
-             FROM queries WHERE ts + ?2 >= ?1 * 86400000
+             FROM queries WHERE ts >= ?1 * 86400000 - ?2
              GROUP BY d ORDER BY d DESC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![from_day, off, limit], |r| {

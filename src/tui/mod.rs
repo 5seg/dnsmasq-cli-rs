@@ -179,7 +179,9 @@ impl App {
     }
 
     pub fn bootstrap(&mut self) -> Result<()> {
-        let rows = self.store.rows_recent(MAX_BUFFER as i64)?;
+        // 起動高速化: 初期ロードは直近 2,000 行に抑える。
+        // メモリバッファ (MAX_BUFFER) は poll_rows() で徐々に埋まる。
+        let rows = self.store.rows_recent(2_000)?;
         self.last_id = rows.last().map(|r| r.id).unwrap_or(0);
         self.events.extend(rows);
         self.refresh_stats()?;
@@ -210,10 +212,13 @@ impl App {
         Ok(())
     }
 
-    fn refresh_stats(&mut self) -> Result<()> {
+    fn refresh_summary(&mut self) -> Result<()> {
         let from = now_millis() - self.period.ms();
         self.summary = self.store.summary(from, self.cfg.top)?;
-        // 直近 DAILY_DAYS 日を固定スロットで用意する (データの無い日はゼロ)。
+        Ok(())
+    }
+
+    fn refresh_daily(&mut self) -> Result<()> {
         let off = crate::util::tz_offset_ms();
         let today = (now_millis() + off) / 86_400_000;
         let start = today - (DAILY_DAYS - 1);
@@ -227,6 +232,18 @@ impl App {
                     .unwrap_or_else(|| DayRow::zeros(ms))
             })
             .collect();
+        Ok(())
+    }
+
+    fn refresh_stats(&mut self) -> Result<()> {
+        match self.tab {
+            Tab::Live => {}
+            Tab::Stats => self.refresh_summary()?,
+            Tab::Daily => {
+                self.refresh_summary()?;
+                self.refresh_daily()?;
+            }
+        }
         self.last_stats = Instant::now();
         Ok(())
     }
@@ -367,6 +384,8 @@ impl App {
             }
             KeyCode::Tab => {
                 self.tab = self.tab.next();
+                // タブ切替時に古いデータを使わないよう即座に再計算を促す
+                self.last_stats = Instant::now() - STATS_INTERVAL;
             }
             KeyCode::Char('1') => {
                 self.period = Period::H1;

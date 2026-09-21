@@ -59,9 +59,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
         Tab::Daily => render_daily(f, app, chunks[1]),
     }
 
-    // ステータス行
-    let status = Paragraph::new(app.status_line()).style(Style::default().fg(Color::DarkGray));
-    f.render_widget(status, chunks[2]);
+    // ステータス行 (ユーザー向け通知 + バックグラウンドのエラーを赤で別枠表示)
+    let mut status_spans = vec![Span::styled(
+        app.status_line(),
+        Style::default().fg(Color::DarkGray),
+    )];
+    if let Some(e) = app.error_line() {
+        status_spans.push(Span::raw("  "));
+        status_spans.push(Span::styled(e, Style::default().fg(Color::Red)));
+    }
+    f.render_widget(Paragraph::new(Line::from(status_spans)), chunks[2]);
 
     if app.confirm.is_some() {
         render_confirm(f, app);
@@ -165,8 +172,15 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     let s = &app.summary;
     // 現在の期間に対応する集計がまだ無い間は数値を出さない (別期間の値を誤表示しない)。
     if app.summary_period != Some(app.period) {
-        let msg = Paragraph::new("(calculating statistics in background...)")
-            .style(Style::default().fg(Color::DarkGray))
+        let (text, color) = match &app.stats_error {
+            Some(e) => (format!("stats unavailable: {e}"), Color::Red),
+            None => (
+                "(calculating statistics in background...)".to_string(),
+                Color::DarkGray,
+            ),
+        };
+        let msg = Paragraph::new(text)
+            .style(Style::default().fg(color))
             .alignment(ratatui::layout::Alignment::Center)
             .block(
                 Block::default()
@@ -305,9 +319,16 @@ fn render_stats(f: &mut Frame, app: &App, area: Rect) {
 /// 日別統計: 上にクエリ数 (cached/reply/forwarded)、下にブロック数を
 /// 1 日 1 本の積み上げ棒で表示する。
 fn render_daily(f: &mut Frame, app: &App, area: Rect) {
-    if app.daily.is_empty() && app.daily_loading {
-        let msg = Paragraph::new("(calculating daily statistics in background...)")
-            .style(Style::default().fg(Color::DarkGray))
+    if app.daily.is_empty() {
+        let (text, color) = match &app.stats_error {
+            Some(e) => (format!("stats unavailable: {e}"), Color::Red),
+            None => (
+                "(calculating daily statistics in background...)".to_string(),
+                Color::DarkGray,
+            ),
+        };
+        let msg = Paragraph::new(text)
+            .style(Style::default().fg(color))
             .alignment(ratatui::layout::Alignment::Center)
             .block(
                 Block::default()

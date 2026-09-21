@@ -144,6 +144,10 @@ pub struct App {
 
     pub summary_loading: bool,
     pub daily_loading: bool,
+    /// バックグラウンド集計 (summary/daily) の直近エラー。
+    pub stats_error: Option<String>,
+    /// 行ポーリングの直近エラー。
+    pub poll_error: Option<String>,
     bg_tx: Sender<BgResult>,
     bg_rx: Receiver<BgResult>,
 
@@ -183,6 +187,8 @@ impl App {
             daily: Vec::new(),
             summary_loading: false,
             daily_loading: false,
+            stats_error: None,
+            poll_error: None,
             bg_tx,
             bg_rx,
             search: String::new(),
@@ -280,10 +286,11 @@ impl App {
                         Ok(s) if period == self.period => {
                             self.summary = s;
                             self.summary_period = Some(period);
+                            self.stats_error = None;
                         }
                         // 取得中に期間が変わった。現在の期間で取り直す。
                         Ok(_) => self.trigger_refresh_summary(),
-                        Err(e) => self.status = format!("summary error: {e}"),
+                        Err(e) => self.stats_error = Some(format!("summary error: {e}")),
                     }
                 }
                 BgResult::Daily(result) => {
@@ -302,8 +309,9 @@ impl App {
                                         .unwrap_or_else(|| DayRow::zeros(ms))
                                 })
                                 .collect();
+                            self.stats_error = None;
                         }
-                        Err(e) => self.status = format!("daily error: {e}"),
+                        Err(e) => self.stats_error = Some(format!("daily error: {e}")),
                     }
                 }
             }
@@ -312,7 +320,9 @@ impl App {
         if self.last_poll.elapsed() >= POLL_INTERVAL {
             self.last_poll = Instant::now();
             if let Err(e) = self.poll_rows() {
-                self.status = format!("db error: {e}");
+                self.poll_error = Some(format!("db error: {e}"));
+            } else {
+                self.poll_error = None;
             }
         }
         if self.last_stats.elapsed() >= STATS_INTERVAL {
@@ -571,6 +581,22 @@ impl App {
             parts.push(self.status.clone());
         }
         parts.join("  ")
+    }
+
+    /// バックグラウンドの直近エラー (ポーリング/集計)。ユーザー向け status とは別枠で表示する。
+    pub fn error_line(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(e) = &self.poll_error {
+            parts.push(e.clone());
+        }
+        if let Some(e) = &self.stats_error {
+            parts.push(e.clone());
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("  "))
+        }
     }
 }
 
